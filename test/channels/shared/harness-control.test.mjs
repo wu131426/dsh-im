@@ -649,6 +649,25 @@ test('a refused in-process control action never falls through to HTTP', async ()
   assert.equal(await asking, 'normal completion');
 });
 
+test('a refused Weixin steer retracts its Host-only origin claim without a second prompt', async () => {
+  const calls = [];
+  const turn = controlledTurn({ controlExecutor: request => { calls.push(['executor', request.inputRpcId]);
+    return false; } });
+  const control = { owner: {}, key: 'direct:origin-refusal' };
+  const asking = turn.client.ask(turn.id, 'work', { control, timeoutMs: 2_000 });
+  await turn.admitted;
+  assert.equal(await turn.client.steerActiveTurn(turn.id, '播放七里香', control, {
+    claimMusicOrigin({ sessionId, rpcId }) { assert.equal(sessionId, turn.id);
+      calls.push(['claim', rpcId]); },
+    revokeMusicOrigin(rpcId) { calls.push(['revoke', rpcId]); },
+  }), false);
+  assert.deepEqual(calls.map(([kind]) => kind), ['claim', 'executor', 'revoke']);
+  assert.equal(calls[0][1], calls[1][1]);
+  assert.equal(calls[1][1], calls[2][1]);
+  turn.finish({ text: 'done', reason: 'completed' });
+  assert.equal(await asking, 'done');
+});
+
 for (const [name, value] of [
   ['Shanghai', 'Asia/Shanghai'],
   ['UTC', 'UTC'],

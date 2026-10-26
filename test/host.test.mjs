@@ -111,6 +111,90 @@ test('Host composes IM channels and the AI Office connector inside one plugin co
   ]);
 });
 
+test('opt-in Weixin music Host service has one trusted scope and does not alter other channels', async () => {
+  const sessionId = 'session-00000000-0000-4000-8000-000000000001';
+  const agent = { id: sessionId, session: { id: sessionId, snapshotEvents: () => [] } };
+  const provided = [], channels = [];
+  const ctx = { agents: { get: id => id === sessionId ? agent : undefined },
+    tools: { get: (name) => name === 'run_code' ? undefined : { name },
+      guard() { return () => {}; } },
+    on() { return () => {}; }, provide: (...entry) => provided.push(entry), effect() {} };
+  await createImHostPlugin({ ...NO_CHANNELS,
+    applyWeixin: async (_ctx, config) => channels.push(['weixin', config.musicOrigin]),
+    applyTelegram: async (_ctx, config) => channels.push(['telegram', config.musicOrigin]),
+    createDeliveryService: () => ({}),
+  }).apply(ctx, { musicOrigin: { sessionId, botId: 'approved-bot', senderId: 'owner-user' } });
+  const service = provided.find(([name]) => name === 'dshImMusicOrigin')?.[1];
+  assert.equal(service.contractVersion, 1);
+  assert.equal(typeof service.verify, 'function');
+  assert.equal(typeof service.verifyExecution, 'function');
+  assert.equal(channels.find(([name]) => name === 'weixin')[1].checkInbound({
+    botId: 'approved-bot', senderId: 'owner-user', sessionId,
+    text: '播放周杰伦的七里香',
+  }).kind, 'allow');
+  assert.equal(channels.find(([name]) => name === 'telegram')[1], undefined);
+});
+
+test('opt-in music cannot report a ready Host when Weixin startup failed', async () => {
+  const sessionId = 'session-00000000-0000-4000-8000-000000000001';
+  const ctx = { agents: { get: () => undefined },
+    tools: { get: () => undefined, guard: () => () => {} },
+    on: () => () => {}, provide() {}, effect() {} };
+  await assert.rejects(createImHostPlugin({ ...NO_CHANNELS,
+    createDeliveryService: () => ({}),
+    applyWeixin: async () => { throw Error('WEIXIN_OFFLINE'); },
+  }).apply(ctx, { musicOrigin: { sessionId, botId: 'approved-bot', senderId: 'owner-user' } }),
+  /MUSIC_HOST_WEIXIN_UNAVAILABLE/);
+});
+
+test('real Cordis injection exposes scoped music proof only after core Agent/tool services exist', async t => {
+  const ctx = new Context(), sessionId = 'session-00000000-0000-4000-8000-000000000001';
+  const guards = new Set();
+  for (const [name, service] of Object.entries({
+    connection: { fetch: { register: () => async () => {} } }, credentials: {},
+    typertGateway: { stream() {} }, sessionController: {}, workspaceController: {},
+    agents: { get: id => id === sessionId ? { id, session: { id, snapshotEvents: () => [] } } : undefined },
+    tools: { get: name => name === 'run_code' ? undefined : { name },
+      guard(fn) { guards.add(fn); return () => guards.delete(fn); } },
+  })) ctx.provide(name, service);
+  const mounted = [];
+  const host = ctx.plugin(createImHostPlugin({ ...NO_CHANNELS,
+    createDeliveryService: () => ({}),
+    applyWeixin: async (_scope, config) => mounted.push(config.musicOrigin),
+  }), { musicOrigin: { sessionId, botId: 'approved-bot', senderId: 'owner-user' } });
+  t.after(() => host.dispose());
+  await host.await();
+  let proof;
+  const consumer = ctx.plugin({ name: 'music-origin-isolated-consumer',
+    inject: ['dshImMusicOrigin'], apply(scope) { proof = scope.dshImMusicOrigin; } });
+  t.after(() => consumer.dispose());
+  await consumer.await();
+  assert.equal(proof.contractVersion, 1);
+  assert.equal(mounted.length, 1);
+  await consumer.dispose();
+  await host.dispose();
+  assert.equal(guards.size, 1); // Root tombstone remains while the Agent is live.
+});
+
+test('real Cordis startup fails closed when opt-in Weixin cannot start', async t => {
+  const ctx = new Context(), sessionId = 'session-00000000-0000-4000-8000-000000000002';
+  const guards = new Set();
+  for (const [name, service] of Object.entries({
+    connection: { fetch: { register: () => async () => {} } }, credentials: {},
+    typertGateway: { stream() {} }, sessionController: {}, workspaceController: {},
+    agents: { get: id => id === sessionId ? { id, session: { id, snapshotEvents: () => [] } } : undefined },
+    tools: { get: name => name === 'run_code' ? undefined : { name },
+      guard(fn) { guards.add(fn); return () => guards.delete(fn); } },
+  })) ctx.provide(name, service);
+  const host = ctx.plugin(createImHostPlugin({ ...NO_CHANNELS,
+    createDeliveryService: () => ({}),
+    applyWeixin: async () => { throw Error('ISOLATED_WEIXIN_OFFLINE'); },
+  }), { musicOrigin: { sessionId, botId: 'approved-bot', senderId: 'owner-user' } });
+  t.after(() => host.dispose());
+  await assert.rejects(host.await(), /MUSIC_HOST_WEIXIN_UNAVAILABLE/);
+  assert.equal(guards.size, 1); // Root-owned closed deny tombstone until Agent disposal.
+});
+
 test('Host provides #65 and installs #84 with the same delivery service', async () => {
   const sent = [];
   const historyReads = [];

@@ -1702,6 +1702,7 @@ export class HarnessClient {
     if (!ownership || ownership.stopRequested) return false;
     if (this.#activeControlOwnership(sessionId, control) !== ownership) return false;
     const inputRpcId = `${this.#rpcIdPrefix}-steer-${randomUUID()}`;
+    options.claimMusicOrigin?.({ sessionId, rpcId: inputRpcId });
     const releaseInputOrigin = registerImInputOrigin(this.#interactionRegistry, inputRpcId);
     try {
       if (this.#controlExecutor) {
@@ -1720,7 +1721,7 @@ export class HarnessClient {
           if (typeof accepted !== 'boolean') {
             throw new TypeError('controlExecutor must return a boolean or undefined');
           }
-          if (!accepted) releaseInputOrigin();
+          if (!accepted) { releaseInputOrigin(); options.revokeMusicOrigin?.(inputRpcId); }
           return accepted;
         }
       }
@@ -1733,6 +1734,7 @@ export class HarnessClient {
       return true;
     } catch (error) {
       releaseInputOrigin();
+      options.revokeMusicOrigin?.(inputRpcId);
       throw error;
     }
   }
@@ -1846,6 +1848,9 @@ export class HarnessClient {
     const baselineSeq = Math.max(-1, ...(before.events ?? []).map(({ event }) => event.seq ?? -1));
     const promptRpcId = `${this.#rpcIdPrefix}-${randomUUID()}`;
     diagnostic.promptRpcId = promptRpcId;
+    // The IM bridge supplies this Host-only callback after the Session binding
+    // is known; never infer a human origin from the model-facing prompt text.
+    options.claimMusicOrigin?.({ sessionId, rpcId: promptRpcId });
     const releasePromptInputOrigin = registerImInputOrigin(this.#interactionRegistry, promptRpcId);
     const tracker = new HarnessReplyTracker({
       promptRpcId, afterSeq: baselineSeq, reasoning, finalAnswerOnly: options.finalAnswerOnly,

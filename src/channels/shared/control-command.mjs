@@ -40,6 +40,7 @@ export function isControlCommand(text) {
 // result guarantees no submission; exceptions must never trigger a second ask.
 export async function steerMessage(text, harness, state, key, {
   signal, control, enhancement, pendingInteraction = false,
+  claimMusicOrigin, revokeMusicOrigin,
 } = {}) {
   if (pendingInteraction) return false;
   const session = boundSession(harness, state, key);
@@ -50,7 +51,8 @@ export async function steerMessage(text, harness, state, key, {
   const steering = enhancement
     ? enhanceContextContent(text, enhancement.snapshot, enhancement.source)
     : text;
-  return session.steerActiveTurn(steering, control, requestOptions(signal));
+  return session.steerActiveTurn(steering, control, { ...requestOptions(signal),
+    ...(claimMusicOrigin ? { claimMusicOrigin, revokeMusicOrigin } : {}) });
 }
 
 export async function runControlCommand(text, harness, state, key, {
@@ -60,6 +62,8 @@ export async function runControlCommand(text, harness, state, key, {
   control,
   deferredDelivery,
   enhancement,
+  claimMusicOrigin,
+  revokeMusicOrigin,
 } = {}) {
   if (!isControlCommand(text)) return null;
   const command = text.trim();
@@ -112,7 +116,7 @@ export async function runControlCommand(text, harness, state, key, {
   // A mid-turn correction carries the same provenance as the message that
   // opened the turn, so a group member who steers is identified too.
   const steered = await steerMessage(instruction, harness, state, key, {
-    signal, control, enhancement,
+    signal, control, enhancement, claimMusicOrigin, revokeMusicOrigin,
   });
   return steered
     ? commandResult(t('已提交补充指令，Agent 会在下一步读取。'))

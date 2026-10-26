@@ -26,6 +26,7 @@ import { installSidebarSettingsRpc } from './sidebar-settings.mjs';
 import { installInjectedContext } from './injected-context.mjs';
 import { installSessionSyncCoordinator } from './session-sync-coordinator.mjs';
 import { installSessionTitlePrefix } from './session-title-prefix.mjs';
+import { installMusicOrigin } from './music-origin.mjs';
 import { installUpdateRpc } from './update-rpc.mjs';
 
 export const name = 'dsh-im-host';
@@ -35,12 +36,13 @@ export const inject = [
   'typertGateway',
 ];
 
-function channelConfig(config, name, deliveryService) {
+function channelConfig(config, name, deliveryService, musicOrigin) {
   const channel = { ...(config.dshHome ? { dshHome: config.dshHome } : {}), ...config[name] };
   const withAuthority = config.rpcAuthority === undefined
     ? channel
     : { ...channel, rpcAuthority: config.rpcAuthority };
-  return name === 'office' ? withAuthority : { ...withAuthority, deliveryService };
+  return name === 'office' ? withAuthority : { ...withAuthority, deliveryService,
+    ...(name === 'weixin' && musicOrigin ? { musicOrigin } : {}) };
 }
 
 export function createImHostPlugin(internals = {}) {
@@ -116,7 +118,17 @@ export function createImHostPlugin(internals = {}) {
         }));
       }
       const activate = async (readyCtx) => {
-        await activateChannels(readyCtx, config, deliveryService);
+        if (config.musicOrigin) {
+          if (typeof readyCtx.inject !== 'function') {
+            const musicOrigin = installMusicOrigin(readyCtx, config.musicOrigin);
+            await activateChannels(readyCtx, config, deliveryService, musicOrigin);
+          } else {
+            await readyCtx.inject(['agents', 'tools'], async (musicCtx) => {
+              const musicOrigin = installMusicOrigin(musicCtx, config.musicOrigin);
+              await activateChannels(musicCtx, config, deliveryService, musicOrigin);
+            });
+          }
+        } else await activateChannels(readyCtx, config, deliveryService);
       };
       if (typeof ctx?.inject === 'function') {
         await ctx.inject(
@@ -135,7 +147,7 @@ export function createImHostPlugin(internals = {}) {
     },
   });
 
-  async function activateChannels(ctx, config, deliveryService) {
+  async function activateChannels(ctx, config, deliveryService, musicOrigin) {
     // Bind the bot message language before any channel connects, so the first
     // command menu a platform stores is already in the interface language.
     const hostLanguage = startHostLanguage(ctx, config);
@@ -200,16 +212,21 @@ export function createImHostPlugin(internals = {}) {
       }
     }
     const failures = [];
+    let musicWeixinFailure = null;
     // Each channel mounts its management RPC before awaiting initialization.
     // Start them together so a slow channel cannot leave later routes absent.
     await Promise.all(channels.map(async ([channel, start]) => {
       try {
-        await start(ctx, channelConfig(config, channel, deliveryService));
+        await start(ctx, channelConfig(config, channel, deliveryService, musicOrigin));
       } catch (error) {
         failures.push(error);
+        if (musicOrigin && channel === 'weixin') musicWeixinFailure = error;
         logger.error?.(`[dsh-im] failed to activate ${channel}; continuing with the remaining channels`, error);
       }
     }));
+    if (musicWeixinFailure) {
+      throw new Error('MUSIC_HOST_WEIXIN_UNAVAILABLE', { cause: musicWeixinFailure });
+    }
     if (failures.length === channels.length) {
       throw new AggregateError(failures, 'dsh-im failed to activate every channel');
     }

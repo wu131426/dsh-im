@@ -119,6 +119,7 @@ export class WeixinRuntime {
   #state;
   #contextEnhancement;
   #accessPolicy;
+  #musicOrigin;
   #logger;
   #diagnostics;
   #startContext = {};
@@ -139,6 +140,7 @@ export class WeixinRuntime {
     state,
     contextEnhancement,
     accessPolicy,
+    musicOrigin,
     logger = console,
     diagnostics,
     replyTimeoutMs = 600_000,
@@ -155,6 +157,7 @@ export class WeixinRuntime {
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
+    this.#musicOrigin = musicOrigin;
     this.#logger = logger;
     this.#diagnostics = diagnostics ?? createWeixinDiagnostics({ logger });
     this.#replyTimeoutMs = replyTimeoutMs;
@@ -202,6 +205,8 @@ export class WeixinRuntime {
         state: this.#state,
         contextEnhancement: this.#contextEnhancement,
         accessPolicy: this.#accessPolicy,
+        musicOrigin: this.#musicOrigin,
+        botId: this.#config.botId,
         status: this.#status,
         logger: this.#logger,
         replyTimeoutMs: this.#replyTimeoutMs,
