@@ -128,10 +128,10 @@ test('opt-in Weixin music Host service has one trusted scope and does not alter 
   assert.equal(service.contractVersion, 1);
   assert.equal(typeof service.verify, 'function');
   assert.equal(typeof service.verifyExecution, 'function');
-  assert.equal(channels.find(([name]) => name === 'weixin')[1].checkInbound({
+  assert.deepEqual(channels.find(([name]) => name === 'weixin')[1].checkInbound({
     botId: 'approved-bot', senderId: 'owner-user', sessionId,
     text: '播放周杰伦的七里香',
-  }).kind, 'allow');
+  }), { kind: 'reject', reason: 'MUSIC_HOST_TOOLS_UNAVAILABLE' });
   assert.equal(channels.find(([name]) => name === 'telegram')[1], undefined);
 });
 

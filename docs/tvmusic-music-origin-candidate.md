@@ -1,5 +1,13 @@
 # TVmusic IM origin Host candidate (not installed)
 
+2026-10-27 safety update: TVmusic PR #39 retired its shared bearer route.
+This Host keeps the verified Weixin ingress/proof code, but `installMusicOrigin`
+now reports music tools unavailable even if an Agent exposes three music tool
+names. A signed DSH binary alone is not a trusted caller identity: a same-user
+code tool can run that executable with `ELECTRON_RUN_AS_NODE=1`. This candidate
+must not be installed as a playback route; the earlier installation steps below
+are historical, not an authorization to activate it.
+
 This candidate changes only the existing Weixin → dsh-im → Harness path. It does
 not search or download music, control a real speaker, open an audio port, or
 change the TVmusic web player. It is opt-in: absent `musicOrigin` configuration,

@@ -325,8 +325,11 @@ export function installMusicOrigin(ctx, config) {
   const registry = createMusicOriginRegistry({ ...config,
     agentFor: id => agents.get(id),
     modeOf: agent => tools.get('run_code', agent) ? 'ptc' : 'native',
-    toolsReady: agent => ['tvmusic_music_play', 'tvmusic_music_playback_status',
-      'tvmusic_music_control'].every(name => Boolean(tools.get(name, agent))),
+    // PR #39's bearer transport is retired. Seeing three Agent tools is not
+    // proof that TVmusic can authenticate this Host rather than another AI
+    // session. Reject Weixin music before submitting it to the Agent until an
+    // OS-authenticated direct route exists; ordinary sessions are unchanged.
+    toolsReady: () => false,
   });
   let stopGuard, stopExecute, stopSession, stopDisposed, retired = false;
   const retire = () => { if (retired) return; retired = true;
