@@ -7,12 +7,14 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { installMusicOrigin, musicIntentKind as hostMusicIntentKind,
   businessIntentKind as hostBusinessIntentKind,
-  businessActionKind as hostBusinessActionKind } from '../../plugin-src/host/music-origin.mjs';
+  businessActionKind as hostBusinessActionKind,
+  mediaReadIntentKind as hostMediaReadIntentKind } from '../../plugin-src/host/music-origin.mjs';
 import { WeixinHarnessBridge } from '../../src/channels/weixin/weixin-bridge.mjs';
 
 if (!process.env.TVMUSIC_PR39_ROOT) throw Error('TVMUSIC_PR39_ROOT is required for isolated PR #39 integration');
 const { musicIntentKind: tvmusicMusicIntentKind, businessIntentKind: tvmusicBusinessIntentKind,
-  businessActionKind: tvmusicBusinessActionKind } = await import(pathToFileURL(join(
+  businessActionKind: tvmusicBusinessActionKind,
+  mediaReadIntentKind: tvmusicMediaReadIntentKind } = await import(pathToFileURL(join(
   process.env.TVMUSIC_PR39_ROOT, 'plugins/dsh-music-im-candidate.mjs')).href);
 const { installMusicImCandidate } = await import(pathToFileURL(join(
   process.env.TVMUSIC_PR39_ROOT, 'plugins/dsh-music-im-candidate.mjs')).href);
@@ -37,6 +39,9 @@ test('Host admission intent shapes match the exact TVmusic PR39 candidate corpus
     '下载电影《流浪地球》第二季', '点看电视剧《三体》'])
     { assert.equal(hostBusinessIntentKind(text), tvmusicBusinessIntentKind(text), text);
       assert.equal(hostBusinessActionKind(text), tvmusicBusinessActionKind(text), text); }
+  for (const text of ['你好', '查 Content OS 发布状态', '找电影《流浪地球》',
+    '查看综艺《歌手》字幕状态', '查影视资源', '查电影下载进度', '下载电影《A》但别下载'])
+    assert.equal(hostMediaReadIntentKind(text), tvmusicMediaReadIntentKind(text), text);
 });
 
 const sessionId = `session-${randomUUID()}`, botId = 'isolated-bot', senderId = 'isolated-owner';
@@ -63,12 +68,16 @@ const inbound = (id, text) => ({ message_id: id, message_type: 1, from_user_id: 
 test('production Host gate blocks old music tools before Agent even when tool names exist', async () => {
   await bridge.accept(inbound('cached', '播放周杰伦的七里香'));
   await bridge.accept(inbound('control', '停'));
+  await bridge.accept(inbound('movie-read', '找电影《流浪地球》'));
   assert.equal(asks.length, 0);
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 3);
   assert.match(sent[0], /不可用.*Mac/);
   assert.match(sent[1], /不可用.*Mac/);
+  assert.match(sent[2], /业务入口暂不可用.*没有执行下载或本机播放/);
   assert.deepEqual(registry.checkInbound({ botId, senderId: 'different-sender', sessionId,
     text: '播放周杰伦的七里香' }), { kind: 'reject', reason: 'MUSIC_HOST_SESSION_SHARED' });
+  assert.deepEqual(registry.checkInbound({ botId, senderId: 'different-sender', sessionId,
+    text: '查 Content OS 发布状态' }), { kind: 'allow' });
 });
 
 test('trusted Weixin turns reach only the four TVmusic media tool families', async t => {
@@ -115,6 +124,8 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
     'tvmusic_movie_resources', 'tvmusic_series', 'tvmusic_receipt'])
     tools.set(name, { execute: async () => ({ status: 'READ_ONLY' }) });
   tools.set('tvmusic_tasks', { execute: async () => businessClient.tasks() });
+  for (const name of ['read_file', 'web_fetch', 'other_os_download', 'content_os_read'])
+    tools.set(name, { execute: async () => { local.push(`original:${name}`); return { originalHost: name }; } });
   const append = (type, data) => events.push({ seq: events.length, type, data });
   let turn = 0;
   const harness = { sessionExists: async () => true,
@@ -122,6 +133,7 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
       const body = typeof prompt === 'string' ? prompt : prompt.at(-1)?.text ?? '';
       const rpcId = `weixin-${randomUUID()}`;
       options.claimMusicOrigin({ sessionId: id, rpcId });
+      if (body === '你好') return '普通聊天';
       const currentTurn = ++turn, message = { role: 'user', source: { kind: 'user', rpcId },
         content: [{ type: 'text', text: body }] };
       append('turn/start', { turn: currentTurn }); append('step/start', { turn: currentTurn, step: 1 });
@@ -133,6 +145,7 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
         : body.includes('读取文件') ? ['read_file', { path: '/tmp/sample' }]
           : body.includes('任意 URL') ? ['web_fetch', { url: 'http://127.0.0.1/' }]
             : body.includes('Sticker') ? ['other_os_download', {}]
+              : body.includes('Content OS') ? ['content_os_read', {}]
               : body.includes('并下载') ? ['tvmusic_movie_watch', { tmdb_id: 10 }]
                 : body.startsWith('找周杰伦') ? ['tvmusic_music_search', { title: '七里香', artist: '周杰伦' }]
                   : body === '第一首' ? ['tvmusic_music_play', {}]
@@ -170,10 +183,18 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
   assert.equal(local.length, 0);
   assert.ok(sent.some(text => /Sound Pro.*出声/.test(text)));
   assert.ok(sent.some(text => /业务请求/.test(text)));
+  await bridge.accept(inbound('ordinary-chat', '你好'));
+  assert.equal(sent.at(-1), '普通聊天');
+  await bridge.accept(inbound('content-read', '查 Content OS 发布状态'));
+  assert.ok(local.includes('original:content_os_read'));
   for (const [id, text] of [['bash', '下载电影《流浪地球》并运行 bash'],
     ['file', '读取文件'], ['url', '访问任意 URL'], ['other', '下载 Sticker 素材'],
-    ['query-write', '查电影下载进度并下载']]) await bridge.accept(inbound(id, text));
-  assert.equal(local.length, 5);
+    ['query-write', '查电影下载进度并下载'],
+    ['mixed-url', '查电影《流浪地球》并访问任意 URL']]) await bridge.accept(inbound(id, text));
+  assert.ok(local.includes('original:read_file') && local.includes('original:web_fetch')
+    && local.includes('original:other_os_download'));
+  assert.equal(local.filter(value => value.startsWith('original:')).length, 4);
+  assert.equal(local.filter(value => !value.startsWith('original:')).length, 3);
   assert.equal(writes.length, 4);
   await bridge.accept(inbound('unsupported', '暂停电视剧下载《三体》'));
   assert.match(sent.at(-1), /不受.*支持/);

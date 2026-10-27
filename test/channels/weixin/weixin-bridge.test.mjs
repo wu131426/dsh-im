@@ -385,13 +385,18 @@ test('Weixin batch synthesis never becomes a single human music origin', async (
     baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: 'owner-user',
     botId: 'approved-bot', musicOrigin, state: fixture.state,
     harness: { sessionExists: async () => true,
-      ask: async () => { asked++; return 'should not ask'; } },
+      ask: async () => { asked++; return '普通批量完成'; } },
   });
   await bridge.accept(message('batch-start', '/batch'));
   await bridge.accept(message('batch-song', '播放周杰伦的七里香'));
   await bridge.accept(message('batch-send', '/send'));
   assert.equal(asked, 0);
   assert.match(sent.at(-1), /批量消息.*单条发送.*Mac/);
+  await bridge.accept(message('batch-other-start', '/batch'));
+  await bridge.accept(message('batch-other', '查询 Content OS 状态'));
+  await bridge.accept(message('batch-other-send', '/send'));
+  assert.equal(asked, 1);
+  assert.equal(sent.at(-1), '普通批量完成');
 });
 
 test('Weixin never relays a model playback claim without a TVmusic tool result', async () => {

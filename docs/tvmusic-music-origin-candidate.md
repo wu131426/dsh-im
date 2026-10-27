@@ -1,14 +1,25 @@
 # TVmusic IM origin Host candidate (not installed)
 
+2026-10-27 通用微信入口修正：`musicOrigin.senderId` 必须是已有微信入口的
+原始 `from_user_id`，而非持久 Session 键的 `p2p:` 前缀版本。实测错误绑定曾
+在 Agent 前回“这个会话已绑定指定点歌入口”，TVmusic 未收到意图。守卫现按
+每条消息分流：TVmusic 音乐/影视查询和动作仍核原消息及工具调用，只能用
+TVmusic 业务白名单；普通聊天、其它 OS 原有请求及不含 TVmusic 意图的批量
+消息保持原 Harness 权限。其它聊天的 TVmusic 请求、无工具/合同和混合本机
+播放器回退仍安全拒绝。此更新只是候选代码与模拟回归，需新固定 SHA 的另行
+现场切换；旧版真实授权不自动延续。
+
 2026-10-27 household business candidate: TVmusic PR #39 retired its shared
 bearer route. This Host binds the verified Weixin sender/body and exact durable
 tool call to four music and three media-write tools, and requires all eight
 TVmusic query tools. Original text, action, title/year/season and selected
 identity are rechecked before a durable movie/series/task command; uncertain
 outcomes read the original receipt, never resubmit. Music searches do not
-download; speaker control never falls back to Mac audio. It is opt-in for one
-bot/sender/Session, not installed, and no real Weixin/speaker/download test has
-run. The older installation instructions below are historical; current
+download; speaker control never falls back to Mac audio. The TVmusic route is
+opt-in for one bot/sender/Session, not a TVmusic-only Harness Session. The
+earlier real Weixin attempts were rejected before Agent work due to the wrong
+sender representation; no successful Weixin→TVmusic or speaker test has run.
+The older installation instructions below are historical; current
 activation/rollback gates are in TVmusic PR #39
 `docs/TVMUSIC_BUSINESS_ENTRY_CANDIDATE.md`.
 

@@ -941,7 +941,7 @@ export class WeixinHarnessBridge {
       const hasImages = hasInboundImages(promptMessage);
       const hasFiles = hasInboundFiles(promptMessage);
       const hasReply = hasReplyReference(promptMessage);
-      if (batchSubmission && this.#musicOrigin?.belongs(this.#botId, sender)) {
+      if (batchSubmission?.messages?.some(text => this.#musicOrigin?.isTvmusic(text))) {
         this.#batchInputs.complete(key, batchSubmission.token);
         batchSettled = true;
         await this.#send(sender, musicRouteFailure('MUSIC_HOST_BATCH_UNSUPPORTED'), contextToken, runId);
