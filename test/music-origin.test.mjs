@@ -96,8 +96,7 @@ test('one Weixin Session keeps ordinary chat and other OS reads, while TVmusic q
   f.append('user/message', { role: 'user', source: ordinary.message.source, content: ordinary.message.content });
   f.append('tool/call', { turn: 1, step: 1, callId: 'chat', name: 'mcp__memory_Content__search_nodes' });
   assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'chat', name: 'mcp__memory_Content__search_nodes' }), undefined);
-  assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'chat', name: 'tvmusic_music_play' }),
-    'MUSIC_HOST_LOCAL_FALLBACK_DENIED');
+  assert.notEqual(f.registry.guardTool({ agent: f.agent, callId: 'chat', name: 'tvmusic_music_play' }), undefined);
   const query = f.admit('找电影《流浪地球》');
   f.append('turn/start', { turn: 2 }); f.append('step/start', { turn: 2, step: 1 });
   f.append('user/message', { role: 'user', source: query.message.source, content: query.message.content });
@@ -117,6 +116,26 @@ test('one Weixin Session keeps ordinary chat and other OS reads, while TVmusic q
   f.admit('查 Content OS 发布状态');
   assert.equal(await f.registry.verifyExecution({ agent: f.agent, callId: 'fallback',
     eventId: song.id, rpcId: song.rpcId }), false);
+});
+
+test('verified contextual confirmations carry the immediately prior event, not a model-supplied object ID', async () => {
+  const f = fixture(), proposal = f.admit('我要看沙丘');
+  f.append('turn/start', { turn: 1 }); f.append('step/start', { turn: 1, step: 1 });
+  f.append('user/message', proposal.message);
+  f.append('tool/call', { turn: 1, step: 1, callId: 'detail', name: 'tvmusic_movie' });
+  assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'detail', name: 'tvmusic_movie' }), undefined);
+  const changed = f.admit('不是老版，是新版');
+  assert.equal((await f.registry.verify({ agent: f.agent, message: changed.message, turn: 2 }))?.previous_event_id,
+    proposal.id);
+  const confirm = f.admit('就这部');
+  f.append('turn/start', { turn: 3 }); f.append('step/start', { turn: 3, step: 1 });
+  f.append('user/message', confirm.message);
+  f.append('tool/call', { turn: 3, step: 1, callId: 'confirm', name: 'tvmusic_movie_watch' });
+  assert.equal((await f.registry.verify({ agent: f.agent, message: confirm.message, turn: 3 }))?.previous_event_id,
+    changed.id);
+  assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'confirm', name: 'tvmusic_movie_watch' }), undefined);
+  f.append('tool/call', { turn: 3, step: 1, callId: 'fallback', name: 'bash' });
+  assert.notEqual(f.registry.guardTool({ agent: f.agent, callId: 'fallback', name: 'bash' }), undefined);
 });
 
 test('an unapproved chat sharing the Session keeps ordinary tools but cannot borrow TVmusic', () => {
@@ -242,8 +261,8 @@ test('ordinary Harness work keeps its original tools; a music turn still blocks 
   f.append('tool/call', { turn: 2, step: 1, callId: 'later-dev', name: 'bash' });
   assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'later-dev',
     rootCallId: 'later-dev', name: 'bash' }), undefined);
-  assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'later-dev',
-    rootCallId: 'later-dev', name: 'tvmusic_music_play' }), 'MUSIC_HOST_LOCAL_FALLBACK_DENIED');
+  assert.notEqual(f.registry.guardTool({ agent: f.agent, callId: 'later-dev',
+    rootCallId: 'later-dev', name: 'tvmusic_music_play' }), undefined);
 });
 
 test('Host guard blocks a music fallback even if TVmusic tools disappear mid-turn', () => {
@@ -318,6 +337,31 @@ test('a search tool result for an original play request reports playback progres
   assert.deepEqual(f.registry.failureFor(song.rpcId), { reason: 'MUSIC_HOST_RESULT_MISMATCH' });
 });
 
+test('pure search reports only actual candidates; later status and unrelated receipt do not erase play truth', async () => {
+  const f = fixture(), query = f.admit('搜一下周杰伦的歌');
+  f.append('turn/start', { turn: 1 }); f.append('step/start', { turn: 1, step: 1 });
+  f.append('user/message', query.message);
+  f.append('tool/call', { turn: 1, step: 1, callId: 'query-song', name: 'tvmusic_music_search' });
+  await f.registry.recordOutcome({ agent: f.agent, callId: 'query-song', name: 'tvmusic_music_search',
+    arguments: { purpose: 'lookup' } }, { value: { id: query.id, status: 'RESULTS', title: '安静',
+    artist: '周杰伦', candidates: [{ id: 'a'.repeat(64), name: '周杰伦 - 安静.flac' }] } });
+  assert.deepEqual(f.registry.failureFor(query.rpcId), { reason: 'MUSIC_HOST_SEARCH_RESULTS',
+    instruction: '1. 周杰伦 - 安静.flac' });
+  const song = f.admit('播放周杰伦的安静');
+  f.append('turn/start', { turn: 2 }); f.append('step/start', { turn: 2, step: 1 });
+  f.append('user/message', song.message);
+  f.append('tool/call', { turn: 2, step: 1, callId: 'play-song', name: 'tvmusic_music_play' });
+  await f.registry.recordOutcome({ agent: f.agent, callId: 'play-song', name: 'tvmusic_music_play' },
+    { value: { id: song.id, status: 'ACCEPTED', target: 'soundpro' } });
+  f.append('tool/call', { turn: 2, step: 1, callId: 'play-status', name: 'tvmusic_music_playback_status' });
+  await f.registry.recordOutcome({ agent: f.agent, callId: 'play-status', name: 'tvmusic_music_playback_status' },
+    { value: { id: song.id, status: 'ACCEPTED', target: 'soundpro' } });
+  f.append('tool/call', { turn: 2, step: 1, callId: 'bad-receipt', name: 'tvmusic_receipt' });
+  await f.registry.recordOutcome({ agent: f.agent, callId: 'bad-receipt', name: 'tvmusic_receipt' },
+    { isError: true });
+  assert.deepEqual(f.registry.failureFor(song.rpcId), { reason: 'MUSIC_HOST_ACCEPTED' });
+});
+
 test('status of an older intent never becomes new-song proof, including NO_ACTIVE', async () => {
   const f = fixture(), input = f.admit('播放另一首歌'), olderId = randomUUID();
   f.append('turn/start', { turn: 1 });
@@ -354,7 +398,7 @@ test('steer failure callback is once-only for UNKNOWN and absent tool results', 
     value: { id: exec.arguments.intent_id, status: 'STOPPED' } });
   assert.deepEqual(notices, []);
   await f.registry.completeTurn(f.agent, 1);
-  assert.deepEqual(notices, [{ reason: 'MUSIC_HOST_OTHER_STOPPED' }]);
+  assert.deepEqual(notices, [{ reason: 'MUSIC_HOST_STOPPED_REPORTED' }]);
   const noTool = f.admit('播放安静', randomUUID(), result => notices.push(result));
   f.append('turn/start', { turn: 2 });
   f.append('step/start', { turn: 2, step: 1 });

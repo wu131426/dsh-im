@@ -175,7 +175,7 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
     throw Error('MUSIC_ORIGIN_SCOPE_REQUIRED');
   const origins = new Map();
   let closed = false, lastSearch = null;
-  let nextAdmission = 0, latestMusicAdmission = 0;
+  let nextAdmission = 0, latestMusicAdmission = 0, latestEventId = null;
   function prune() {
     const time = now();
     for (const [id, record] of origins) if (record.expiresAt <= time) origins.delete(id);
@@ -306,22 +306,22 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
       const prior = origins.get(rpcId);
       if (prior) return prior.bodyHash === bodyHash;
       const musicAction = musicIntentKind(text);
-      if (!selectionIndex(text)) lastSearch = null; // Any intervening human message revokes ordinal context.
       const businessAction = businessActionKind(text);
       const kind = musicAction ? 'music' : businessAction ? 'business'
         : mediaReadIntentKind(text) ? 'media-read'
           : explicitDevelopmentWork(text) ? 'development' : 'other';
       const admission = ++nextAdmission;
       origins.set(rpcId, { sessionId, senderId, eventId, bodyHash,
-        kind, musicAction, businessAction, originalText: text,
+        kind, musicAction, businessAction, originalText: text, previousEventId: latestEventId,
         admission, expiresAt: now() + ORIGIN_TTL_MS,
         ...(typeof onFailure === 'function' ? { onFailure } : {}) });
+      latestEventId = eventId;
       latestMusicAdmission = admission; // Any newer human turn fences a delayed TVmusic action.
       prune();
       return true;
     },
     revokeSession(id) { if (id === sessionId) {
-      origins.clear(); latestMusicAdmission = 0; lastSearch = null;
+      origins.clear(); latestMusicAdmission = 0; latestEventId = null; lastSearch = null;
     } },
     failureFor(rpcId) {
       prune();
@@ -353,32 +353,40 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
       const record = recordFor(agent, rpcId, eventIdOf(rpcId));
       if (!record || record.admission < latestMusicAdmission
         || !facts || !boundCall(agent, callId, rootCallId, rpcId, record, facts)) return;
+      if (BUSINESS_TOOLS.has(name)) record.kind = 'business';
+      else if (MUSIC_TOOLS.has(name)) record.kind = 'music';
+      else if (record.kind === 'other') record.kind = 'media-read';
       const value = result?.value ?? result;
       if (record.kind === 'media-read') {
         if (SAFE_READS.has(name)) record.outcome = result?.isError
           ? { reason: 'TVMUSIC_BUSINESS_ROUTE_UNAVAILABLE' } : null;
         return;
       }
+      if (SAFE_READS.has(name)) return; // A receipt/query cannot erase a music play or control result.
       if (BUSINESS_TOOLS.has(name)) {
-        if (record.kind !== 'business') return;
         const expected = digest(`tvmusic-business-v1:${record.eventId}`);
         const status = value?.state === 'SUCCEEDED' && value?.result?.status === 'UNAVAILABLE'
           ? 'TVMUSIC_BUSINESS_UNSUPPORTED'
           : value?.state === 'SUCCEEDED' ? 'TVMUSIC_BUSINESS_ACCEPTED'
             : value?.state === 'IN_PROGRESS' ? 'TVMUSIC_BUSINESS_PREPARING'
               : 'TVMUSIC_BUSINESS_UNKNOWN';
+        const question = typeof value?.question === 'string' && value.question.length <= 180
+          && !/[\r\n]|https?:|\/Users\/|token|secret|capability/i.test(value.question)
+          ? value.question : null;
         record.outcome = { reason: result?.isError ? 'TVMUSIC_BUSINESS_UNKNOWN'
-          : value?.status === 'CLARIFY' ? 'TVMUSIC_BUSINESS_CLARIFY'
+          : value?.status === 'CONFIRM_REQUIRED' && question ? 'TVMUSIC_BUSINESS_CONFIRM_REQUIRED'
+            : value?.status === 'CLARIFY' ? 'TVMUSIC_BUSINESS_CLARIFY'
             : value?.status === 'CONFLICT' ? 'TVMUSIC_BUSINESS_CONFLICT'
             : value?.status === 'UNSUPPORTED' && name === 'tvmusic_task_control'
             ? 'TVMUSIC_BUSINESS_UNSUPPORTED'
-            : value?.request_id === expected ? status : 'TVMUSIC_BUSINESS_UNKNOWN' };
+            : value?.request_id === expected ? status : 'TVMUSIC_BUSINESS_UNKNOWN',
+        ...(value?.status === 'CONFIRM_REQUIRED' && question ? { instruction: question } : {}) };
         return;
       }
       if (record.kind !== 'music') return;
       // A search-shaped tool call from a verified play turn is the prelude to
       // the same playback intent, not a standalone read-only search result.
-      if (name === 'tvmusic_music_search' && record.musicAction !== 'play') {
+      if (name === 'tvmusic_music_search' && toolArgs?.purpose !== 'play' && value?.target !== 'soundpro') {
         const choices = Array.isArray(value?.candidates) ? value.candidates
           .filter(row => typeof row?.name === 'string' && row.name.length <= 60
             && /^[a-f\d]{64}$/.test(row.id) && !/[\/\r\n]|https?:|token|secret/i.test(row.name))
@@ -388,13 +396,16 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
           : value?.id !== record.eventId ? 'MUSIC_HOST_RESULT_MISMATCH'
             : value?.status === 'UNKNOWN' ? 'MUSIC_HOST_SEARCH_UNKNOWN'
               : value?.status === 'CLARIFY' ? 'MUSIC_HOST_CLARIFY'
-              : names.length ? 'MUSIC_HOST_CLARIFY' : 'MUSIC_HOST_PREPARING',
+              : ['RESULTS', 'EXISTING'].includes(value?.status) && names.length
+                ? 'MUSIC_HOST_SEARCH_RESULTS'
+                : ['RESULTS', 'EXISTING'].includes(value?.status) ? 'MUSIC_HOST_SEARCH_EMPTY'
+                  : 'MUSIC_HOST_PREPARING',
         ...(names.length ? { instruction: names.join('；') } : {}) };
         if (!result?.isError && value?.id === record.eventId && record.admission === nextAdmission
           && ['RESULTS', 'EXISTING'].includes(value.status) && names.length
           && typeof value.title === 'string' && value.title && typeof value.artist === 'string'
           && value.artist)
-          lastSearch = { search_id: value.id, title: value.title, artist: value.artist,
+          lastSearch = { eventId: record.eventId, search_id: value.id, title: value.title, artist: value.artist,
             candidates: choices.map(row => ({ id: row.id, name: row.name })),
             expiresAt: now() + 10 * 60_000 };
         return;
@@ -405,7 +416,7 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
         ? rawInstruction : null;
       let reason = resultReason(value?.status, result?.isError);
       const playResult = name === 'tvmusic_music_play'
-        || name === 'tvmusic_music_search' && record.musicAction === 'play';
+        || name === 'tvmusic_music_search' && (toolArgs?.purpose === 'play' || value?.target === 'soundpro');
       if (!result?.isError && playResult && value?.id !== record.eventId)
         reason = 'MUSIC_HOST_RESULT_MISMATCH';
       if (!result?.isError && !playResult) {
@@ -414,8 +425,11 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
         else if (!requested && !value?.id && value?.status === 'UNKNOWN')
           reason = name === 'tvmusic_music_control' ? 'MUSIC_HOST_OUTPUT_UNKNOWN' : 'MUSIC_HOST_OTHER_UNKNOWN';
         else if (!value?.id || requested && value.id !== requested) reason = 'MUSIC_HOST_RESULT_MISMATCH';
-        else reason = name === 'tvmusic_music_control' && value.status === 'UNKNOWN'
-          ? 'MUSIC_HOST_OUTPUT_UNKNOWN' : otherIntentReason(value.status);
+        else if (name === 'tvmusic_music_control') reason = value.status === 'UNKNOWN'
+          ? 'MUSIC_HOST_OUTPUT_UNKNOWN' : resultReason(value.status, result?.isError);
+        else if (value.id === record.eventId) reason = value.status === 'UNKNOWN'
+          ? 'MUSIC_HOST_OUTPUT_UNKNOWN' : resultReason(value.status, result?.isError);
+        else reason = otherIntentReason(value.status);
       }
       record.outcome = { reason, ...(instruction ? { instruction } : {}) };
     },
@@ -427,11 +441,15 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
       // pre-step precedes durable user/message. The Host-created ingress claim
       // proves this admission; verifyExecution later requires both log events.
       if (!record || body === null || digest(body) !== record.bodyHash) return null;
-      const index = selectionIndex(body), choice = index && lastSearch?.expiresAt > now()
-        ? lastSearch.candidates[index - 1] : null;
+      const index = selectionIndex(body);
+      const recentSearch = lastSearch?.eventId === record.previousEventId && lastSearch.expiresAt > now()
+        ? lastSearch : null;
+      const choice = index && recentSearch ? recentSearch.candidates[index - 1] : null;
       return { human: true, channel: 'weixin', session_id: sessionId, rpc_id: rpcId,
         sender_id: record.senderId, content_sha256: record.bodyHash,
         original_text: record.originalText, business_action: record.businessAction,
+        previous_event_id: record.previousEventId,
+        ...(recentSearch ? { search_context: recentSearch } : {}),
         ...(choice && /^[a-f\d]{64}$/.test(choice.id) ? { selection: {
           search_id: lastSearch.search_id, candidate_id: choice.id,
           title: lastSearch.title, artist: lastSearch.artist, index } } : {}) };
@@ -448,10 +466,12 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
       if (closed) return 'MUSIC_HOST_ORIGIN_UNKNOWN';
       const facts = callFacts(agent, callId, rootCallId), rpcId = facts?.root?.owner;
       const record = recordFor(agent, rpcId, eventIdOf(rpcId));
-      if (record && !['other', 'development'].includes(record.kind) && record.admission < latestMusicAdmission)
+      const protectedTool = MUSIC_TOOLS.has(name) || BUSINESS_TOOLS.has(name) || SAFE_READS.has(name);
+      if (record && record.admission < latestMusicAdmission
+        && (protectedTool || record.tvmusicSelected || !['other', 'development'].includes(record.kind)))
         return 'MUSIC_HOST_STALE_EVENT';
-      if (['other', 'development'].includes(record?.kind)) return MUSIC_TOOLS.has(name) || BUSINESS_TOOLS.has(name)
-        ? 'MUSIC_HOST_LOCAL_FALLBACK_DENIED' : undefined;
+      if (record && ['other', 'development'].includes(record.kind)
+        && !record.tvmusicSelected && !protectedTool) return undefined;
       if (!record) {
         const messages = facts?.events?.filter(event => event?.type === 'user/message'
           && event.data?.source?.rpcId === rpcId) ?? [];
@@ -466,16 +486,19 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
       if (!facts || !record || !boundCall(agent, callId, rootCallId, rpcId, record, facts)
         || (callId === (rootCallId ?? callId) ? facts.root.event.data.name : facts.target?.event.data.name) !== name)
         return 'MUSIC_HOST_ORIGIN_UNKNOWN';
-      return record.kind === 'music' && MUSIC_TOOLS.has(name)
-          && record.musicAction !== 'ambiguous'
-          && (record.musicAction !== 'search' || name === 'tvmusic_music_search')
-          && (record.musicAction !== 'status' || name === 'tvmusic_music_playback_status')
-          && (record.musicAction !== 'control' || !['tvmusic_music_play', 'tvmusic_music_search'].includes(name))
-          && (record.musicAction !== 'play' || name !== 'tvmusic_music_control')
-        || record.kind === 'music' && record.musicAction === 'ambiguous' && SAFE_READS.has(name)
-        || record.kind === 'business' && (businessAllowed(record.businessAction, name, toolArgs)
-          || SAFE_READS.has(name))
-        || record.kind === 'media-read' && SAFE_READS.has(name)
+      if (record.kind === 'development') return protectedTool ? 'MUSIC_HOST_LOCAL_FALLBACK_DENIED' : undefined;
+      if (record.kind === 'music' && BUSINESS_TOOLS.has(name)
+        || ['business', 'media-read'].includes(record.kind) && MUSIC_TOOLS.has(name)
+        || record.kind === 'music' && record.musicAction === 'search'
+          && (name === 'tvmusic_music_play' || name === 'tvmusic_music_search' && toolArgs?.purpose === 'play')
+        || record.kind === 'music' && record.musicAction === 'status'
+          && ['tvmusic_music_play', 'tvmusic_music_control'].includes(name)
+        || record.kind === 'music' && record.musicAction === 'control'
+          && ['tvmusic_music_play', 'tvmusic_music_search'].includes(name)
+        || record.kind === 'music' && record.musicAction === 'ambiguous' && !SAFE_READS.has(name))
+        return 'MUSIC_HOST_LOCAL_FALLBACK_DENIED';
+      if (protectedTool) { record.tvmusicSelected = true; return undefined; }
+      return record.kind === 'other' && !record.tvmusicSelected
         ? undefined : 'MUSIC_HOST_LOCAL_FALLBACK_DENIED';
     },
   });

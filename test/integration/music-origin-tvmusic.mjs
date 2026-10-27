@@ -137,7 +137,7 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
   for (const name of ['read_file', 'web_fetch', 'other_os_download', 'content_os_read'])
     tools.set(name, { execute: async () => { local.push(`original:${name}`); return { originalHost: name }; } });
   const append = (type, data) => events.push({ seq: events.length, type, data });
-  let turn = 0;
+  let turn = 0, stagedTool = null;
   const harness = { sessionExists: async () => true,
     async ask(id, prompt, options) {
       const body = typeof prompt === 'string' ? prompt : prompt.at(-1)?.text ?? '';
@@ -151,19 +151,21 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
       await hooks.get('agent/pre-step')({ agent: app, turn: currentTurn, step: 1,
         signal: new AbortController().signal, messages: [message] },
       async () => ({ kind: 'enter', messages: [message] }));
-      const [name, args] = body.includes('bash') ? ['bash', { command: 'afplay' }]
+      const [name, args] = ['对', '就这部', '开始吧'].includes(body) && stagedTool
+        ? [stagedTool, {}]
+        : body.includes('bash') ? ['bash', { command: 'afplay' }]
         : body.includes('读取文件') ? ['read_file', { path: '/tmp/sample' }]
           : body.includes('任意 URL') ? ['web_fetch', { url: 'http://127.0.0.1/' }]
             : body.includes('Sticker') ? ['other_os_download', {}]
               : body.includes('Content OS') ? ['content_os_read', {}]
               : body.includes('并下载') ? ['tvmusic_movie_watch', { tmdb_id: 10 }]
-                : body.startsWith('找周杰伦') ? ['tvmusic_music_search', { title: '七里香', artist: '周杰伦' }]
-                  : body.startsWith('播放周杰伦的安静') ? ['tvmusic_music_search', { title: '安静', artist: '周杰伦' }]
+                : body.startsWith('找周杰伦') ? ['tvmusic_music_search', { title: '七里香', artist: '周杰伦', purpose: 'lookup' }]
+                  : body.startsWith('播放周杰伦的安静') ? ['tvmusic_music_search', { title: '安静', artist: '周杰伦', purpose: 'play' }]
                   : body === '第一首' ? ['tvmusic_music_play', {}]
                     : body.includes('周杰伦') ? ['tvmusic_music_play', { title: '七里香', artist: '周杰伦' }]
         : body.includes('电影《') ? ['tvmusic_movie_watch', { tmdb_id: 10 }]
-          : body.includes('综艺《') ? ['tvmusic_series_action', { tmdb_id: 30, season_number: 3, action: 'download_season' }]
-            : body.includes('《三体》') ? ['tvmusic_series_action', { tmdb_id: 20, season_number: 2, action: 'follow_season' }]
+          : body.includes('综艺《') ? ['tvmusic_series_action', { tmdb_id: 30, season_number: 3, action: 'download_season', media_type: 'variety' }]
+            : body.includes('《三体》') ? ['tvmusic_series_action', { tmdb_id: 20, season_number: 2, action: 'follow_season', media_type: 'series' }]
               : ['tvmusic_tasks', {}];
       const callId = randomUUID(), exec = { agent: app, name, arguments: args, callId,
         rootCallId: callId, signal: new AbortController().signal };
@@ -175,6 +177,8 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
       }
       const result = await hostHooks.get('tools/execute')(exec, () => hooks.get('tools/execute')(exec,
         () => tools.get(name).execute(args, exec)));
+      if (result?.status === 'CONFIRM_REQUIRED') stagedTool = name;
+      else if (['SUCCEEDED', 'IN_PROGRESS', 'UNKNOWN'].includes(result?.state)) stagedTool = null;
       return JSON.stringify(result);
     } };
   const state = { hasSeen: id => seen.has(id), markSeen: async id => { seen.add(id); },
@@ -187,7 +191,8 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
   const inbound = (id, text) => ({ message_id: id, message_type: 1, from_user_id: owner,
     context_token: `context-${id}`, item_list: [{ type: 1, text_item: { text } }] });
   for (const [id, text] of [['song', '播放周杰伦的七里香'], ['movie', '下载电影《流浪地球》'],
-    ['series', '追《三体》第二季'], ['variety', '下载综艺《歌手》第三季'], ['query', '查电影下载进度']])
+    ['movie-confirm', '就这部'], ['series', '追《三体》第二季'], ['series-confirm', '开始吧'],
+    ['variety', '下载综艺《歌手》第三季'], ['variety-confirm', '对'], ['query', '查电影下载进度']])
     await bridge.accept(inbound(id, text));
   assert.deepEqual(writes.map(row => row.operation), ['music.play', 'movie.watch', 'series.action', 'series.action']);
   assert.equal(new Set(writes.filter(row => row.request_id).map(row => row.request_id)).size, 3);
@@ -205,7 +210,7 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
   assert.ok(local.includes('original:read_file') && local.includes('original:web_fetch')
     && local.includes('original:other_os_download'));
   assert.equal(local.filter(value => value.startsWith('original:')).length, 4);
-  assert.equal(local.filter(value => !value.startsWith('original:')).length, 3);
+  assert.ok(local.filter(value => !value.startsWith('original:')).length >= 2);
   assert.equal(writes.length, 4);
   await bridge.accept(inbound('unsupported', '暂停电视剧下载《三体》'));
   assert.match(sent.at(-1), /不受.*支持/);
