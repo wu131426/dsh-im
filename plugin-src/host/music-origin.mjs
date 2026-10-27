@@ -174,7 +174,7 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
     || typeof botId !== 'string' || !botId || typeof senderId !== 'string' || !senderId)
     throw Error('MUSIC_ORIGIN_SCOPE_REQUIRED');
   const origins = new Map();
-  let closed = false, lastSearch = null;
+  let closed = false, lastSearch = null, lastMediaSearch = null;
   let nextAdmission = 0, latestMusicAdmission = 0, latestEventId = null;
   function prune() {
     const time = now();
@@ -266,7 +266,7 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
     try { await record.onFailure(outcome); } catch { /* Existing Weixin delivery owns its diagnostics. */ }
   }
   return Object.freeze({
-    close() { closed = true; origins.clear(); lastSearch = null; },
+    close() { closed = true; origins.clear(); lastSearch = null; lastMediaSearch = null; },
     isControl(text) { return musicIntentKind(text) === 'control'; },
     isBusiness(text) { return Boolean(businessIntentKind(text) || mediaReadIntentKind(text)); },
     isTvmusic(text) { return Boolean(tvmusicIntent(text)); },
@@ -321,7 +321,7 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
       return true;
     },
     revokeSession(id) { if (id === sessionId) {
-      origins.clear(); latestMusicAdmission = 0; latestEventId = null; lastSearch = null;
+      origins.clear(); latestMusicAdmission = 0; latestEventId = null; lastSearch = null; lastMediaSearch = null;
     } },
     failureFor(rpcId) {
       prune();
@@ -357,6 +357,15 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
       else if (MUSIC_TOOLS.has(name)) record.kind = 'music';
       else if (record.kind === 'other') record.kind = 'media-read';
       const value = result?.value ?? result;
+      if (name === 'tvmusic_search' && !result?.isError && Array.isArray(value?.items)) {
+        const items = value.items.filter(row => Number.isSafeInteger(row?.tmdb_id) && row.tmdb_id > 0
+          && typeof row.title === 'string' && row.title.length > 0 && row.title.length <= 100
+          && Number.isSafeInteger(row.year) && row.year >= 1888
+          && ['movie', 'series', 'variety'].includes(row.media_type)).slice(0, 20)
+          .map(row => ({ tmdb_id: row.tmdb_id, title: row.title, year: row.year,
+            media_type: row.media_type }));
+        lastMediaSearch = { event_id: record.eventId, items, expires_at: now() + 10 * 60_000 };
+      }
       if (record.kind === 'media-read') {
         if (SAFE_READS.has(name)) record.outcome = result?.isError
           ? { reason: 'TVMUSIC_BUSINESS_ROUTE_UNAVAILABLE' } : null;
@@ -444,12 +453,15 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
       const index = selectionIndex(body);
       const recentSearch = lastSearch?.eventId === record.previousEventId && lastSearch.expiresAt > now()
         ? lastSearch : null;
+      const mediaContext = lastMediaSearch?.event_id === record.previousEventId
+        && lastMediaSearch.expires_at > now() ? lastMediaSearch : null;
       const choice = index && recentSearch ? recentSearch.candidates[index - 1] : null;
       return { human: true, channel: 'weixin', session_id: sessionId, rpc_id: rpcId,
         sender_id: record.senderId, content_sha256: record.bodyHash,
         original_text: record.originalText, business_action: record.businessAction,
         previous_event_id: record.previousEventId,
         ...(recentSearch ? { search_context: recentSearch } : {}),
+        ...(mediaContext ? { media_context: mediaContext } : {}),
         ...(choice && /^[a-f\d]{64}$/.test(choice.id) ? { selection: {
           search_id: lastSearch.search_id, candidate_id: choice.id,
           title: lastSearch.title, artist: lastSearch.artist, index } } : {}) };

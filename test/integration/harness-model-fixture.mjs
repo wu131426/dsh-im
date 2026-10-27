@@ -20,7 +20,7 @@ const eventId = (agentId, turn) => {
 };
 const output = { schema: { type: 'object', additionalProperties: true },
   render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] };
-const songs = new Map(), receipts = new Map(), active = new Map();
+const songs = new Map(), receipts = new Map(), active = new Map(), mediaSearches = new Map();
 const audit = (operation, data) => console.error(`TVMUSIC_MODEL_FIXTURE=${JSON.stringify({ operation, ...data })}`);
 
 function trustedContext(exec) {
@@ -37,8 +37,11 @@ function trustedContext(exec) {
   const text = users[0].content?.filter(part => part.type === 'text').map(part => part.text).join('\n') ?? '';
   if (!text.trim()) throw Error('MODEL_FIXTURE_USER_REQUIRED');
   const id = exec.agent.id, current = call.data.turn;
+  const previous_event_id = current > 1 ? eventId(id, current - 1) : null;
+  const priorSearch = mediaSearches.get(id);
   return { source: 'harness', human_request: true, event_id: eventId(id, current),
-    previous_event_id: current > 1 ? eventId(id, current - 1) : null,
+    previous_event_id,
+    ...(priorSearch?.event_id === previous_event_id ? { media_context: priorSearch } : {}),
     session_hash: digest(`isolated-model:${id}`), human_text: text };
 }
 
@@ -128,7 +131,13 @@ export function apply(ctx) {
     const dispose = ctx.tools.register({ name, description,
       parameters: { type: 'object', properties, additionalProperties: false }, output,
       timeoutMs: 15000, isConcurrencySafe: () => true,
-      async execute(args, exec) { exec.signal.throwIfAborted(); trustedContext(exec); return execute(args); } });
+      async execute(args, exec) { exec.signal.throwIfAborted();
+        const proof = trustedContext(exec), result = await execute(args);
+        if (name === 'tvmusic_search' && Array.isArray(result?.items))
+          mediaSearches.set(exec.agent.id, { event_id: proof.event_id,
+            items: result.items.map(({ tmdb_id, title, year, media_type }) => (
+              { tmdb_id, title, year, media_type })), expires_at: Date.now() + 10 * 60_000 });
+        return result; } });
     if (typeof dispose === 'function') disposers.push(dispose);
   };
   register('tvmusic_panel', '只读获取当前 TVmusic 的候选快照，不下载。', {}, () => businessClient.panel());
