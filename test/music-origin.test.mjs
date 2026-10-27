@@ -118,6 +118,25 @@ test('one Weixin Session keeps ordinary chat and other OS reads, while TVmusic q
     eventId: song.id, rpcId: song.rpcId }), false);
 });
 
+test('Host pins one verified media search only to the immediately following human turn', async () => {
+  const f = fixture(), first = f.admit('我要看沙丘');
+  f.append('turn/start', { turn: 1 }); f.append('step/start', { turn: 1, step: 1 });
+  f.append('user/message', first.message);
+  f.append('tool/call', { turn: 1, step: 1, callId: 'media-search', name: 'tvmusic_search' });
+  await f.registry.recordOutcome({ agent: f.agent, callId: 'media-search', name: 'tvmusic_search' },
+    { value: { items: [
+      { media_type: 'movie', tmdb_id: 11, title: '沙丘', year: 1984 },
+      { media_type: 'movie', tmdb_id: 12, title: '沙丘', year: 2021 },
+    ] } });
+  const second = f.admit('不是老版，是新版');
+  const proof = await f.registry.verify({ agent: f.agent, message: second.message, turn: 2 });
+  assert.equal(proof.previous_event_id, first.id);
+  assert.deepEqual(proof.media_context.items.map(row => row.tmdb_id), [11, 12]);
+  const third = f.admit('你好'), fourth = f.admit('新版');
+  assert.equal((await f.registry.verify({ agent: f.agent, message: third.message, turn: 3 })).media_context, undefined);
+  assert.equal((await f.registry.verify({ agent: f.agent, message: fourth.message, turn: 4 })).media_context, undefined);
+});
+
 test('verified contextual confirmations carry the immediately prior event, not a model-supplied object ID', async () => {
   const f = fixture(), proposal = f.admit('我要看沙丘');
   f.append('turn/start', { turn: 1 }); f.append('step/start', { turn: 1, step: 1 });
