@@ -6,6 +6,8 @@ import { Context } from '@deepseek-ai/cordis';
 import { setImHostLanguage } from '../src/channels/shared/i18n.mjs';
 import { createImHostPlugin, inject, name } from '../plugin-src/host/index.mjs';
 
+process.env.TVMUSIC_HARNESS_URL = 'http://127.0.0.1:4317/'; // Synthetic Host scope; no service request.
+
 const NO_CHANNELS = Object.freeze({
   applyFeishu: async () => {}, applyWeixin: async () => {}, applyDingtalk: async () => {},
   applyWecom: async () => {}, applyWecomApp: async () => {}, applyQq: async () => {},
@@ -131,7 +133,7 @@ test('opt-in Weixin music Host service has one trusted scope and does not alter 
   assert.deepEqual(channels.find(([name]) => name === 'weixin')[1].checkInbound({
     botId: 'approved-bot', senderId: 'owner-user', sessionId,
     text: '播放周杰伦的七里香',
-  }), { kind: 'reject', reason: 'MUSIC_HOST_TOOLS_UNAVAILABLE' });
+  }), { kind: 'allow' });
   assert.equal(channels.find(([name]) => name === 'telegram')[1], undefined);
 });
 

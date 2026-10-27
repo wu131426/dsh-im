@@ -1,12 +1,25 @@
 # TVmusic IM origin Host candidate (not installed)
 
-2026-10-27 safety update: TVmusic PR #39 retired its shared bearer route.
-This Host keeps the verified Weixin ingress/proof code, but `installMusicOrigin`
-now reports music tools unavailable even if an Agent exposes three music tool
-names. A signed DSH binary alone is not a trusted caller identity: a same-user
-code tool can run that executable with `ELECTRON_RUN_AS_NODE=1`. This candidate
-must not be installed as a playback route; the earlier installation steps below
-are historical, not an authorization to activate it.
+2026-10-27 household business candidate: TVmusic PR #39 retired its shared
+bearer route. This Host binds the verified Weixin sender/body and exact durable
+tool call to four music and three media-write tools, and requires all eight
+TVmusic query tools. Original text, action, title/year/season and selected
+identity are rechecked before a durable movie/series/task command; uncertain
+outcomes read the original receipt, never resubmit. Music searches do not
+download; speaker control never falls back to Mac audio. It is opt-in for one
+bot/sender/Session, not installed, and no real Weixin/speaker/download test has
+run. The older installation instructions below are historical; current
+activation/rollback gates are in TVmusic PR #39
+`docs/TVMUSIC_BUSINESS_ENTRY_CANDIDATE.md`.
+
+This does **not** claim strong identity isolation among processes of the same
+macOS user. A code tool can run the signed DSH binary with
+`ELECTRON_RUN_AS_NODE=1`, and same-UID code can call TVmusic's loopback HTTP.
+The Host guard limits the approved Agent path, not all local processes. DSH
+receives only a fixed loopback URL, never the Sound Pro password or the entire
+Infisical environment. Do not use the old bearer launch recipe.
+
+## Historical PR461-only design (not the current combined candidate)
 
 This candidate changes only the existing Weixin → dsh-im → Harness path. It does
 not search or download music, control a real speaker, open an audio port, or

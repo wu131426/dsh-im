@@ -301,6 +301,22 @@ export function createWeixinBridgeStatus() {
 
 function musicRouteFailure(reason) {
   switch (reason) {
+    case 'TVMUSIC_BUSINESS_ROUTE_UNAVAILABLE':
+      return t('TVmusic 业务入口暂不可用，没有执行下载或本机播放。');
+    case 'TVMUSIC_BUSINESS_NO_RESULT':
+      return t('本轮没有可核验的 TVmusic 业务结果；如已提交，请先查原请求，不能自动重发。');
+    case 'TVMUSIC_BUSINESS_ACCEPTED':
+      return t('TVmusic 已受理原业务请求；下载或入库完成情况请查后续状态。');
+    case 'TVMUSIC_BUSINESS_PREPARING':
+      return t('TVmusic 原业务请求仍在处理中；没有重复提交。');
+    case 'TVMUSIC_BUSINESS_UNKNOWN':
+      return t('TVmusic 原业务请求结果待核对；不能换 ID 或自动重发。');
+    case 'TVMUSIC_BUSINESS_UNSUPPORTED':
+      return t('当前任务控制不受 TVmusic 后端支持，没有伪造停止或执行替代操作。');
+    case 'TVMUSIC_BUSINESS_CLARIFY':
+      return t('请明确片名、年份、季集和操作；本轮没有提交下载或控制。');
+    case 'TVMUSIC_BUSINESS_CONFLICT':
+      return t('原微信消息已绑定另一个业务请求；请先查原回执，不换 ID 或自动重发。');
     case 'MUSIC_HOST_SESSION_UNBOUND':
       return t('当前手机会话未绑定 TVmusic 点歌工具，没有改用 Mac 播放。');
     case 'MUSIC_HOST_TOOLS_UNAVAILABLE':
@@ -317,6 +333,8 @@ function musicRouteFailure(reason) {
       return t('当前点歌会话暂不接受批量消息，请单条发送；没有改用 Mac 播放。');
     case 'MUSIC_HOST_NO_RESULT':
       return t('本轮没有可核验的点歌结果；可补充歌曲信息，若已提交则先查原请求。没有改用 Mac 播放。');
+    case 'MUSIC_HOST_SEARCH_UNKNOWN':
+      return t('歌曲搜索结果待核对；先查原搜索，不自动下载或播放。');
     case 'MUSIC_HOST_STALE_EVENT':
       return t('这条点歌消息已被新请求取代，旧结果不作为播放证明；没有改用 Mac 播放。');
     case 'MUSIC_HOST_OUTPUT_UNKNOWN':
@@ -457,7 +475,9 @@ export class WeixinHarnessBridge {
     const route = this.#musicOrigin.checkInbound({ botId: this.#botId,
       senderId: sender, sessionId, text, hasMedia });
     if (route.kind !== 'reject') return route;
-    const reason = musicRouteFailure(route.reason)
+    const reason = (route.reason === 'TVMUSIC_BUSINESS_UNSUPPORTED'
+      ? musicRouteFailure(route.reason) : this.#musicOrigin.isBusiness?.(text)
+      ? musicRouteFailure('TVMUSIC_BUSINESS_ROUTE_UNAVAILABLE') : musicRouteFailure(route.reason))
       ?? t('TVmusic 点歌状态暂不可查，没有改用 Mac 播放。');
     const controlHint = this.#musicOrigin.isControl?.(text)
       ? ` ${t('音箱状态未确认，可能仍在播放；请在原设备手动核对。')}` : '';
@@ -470,7 +490,9 @@ export class WeixinHarnessBridge {
       claimMusicOrigin: ({ sessionId, rpcId }) => {
         const route = this.#musicRoute(sender, sessionId, text);
         if (route.kind === 'reject') {
-          throw Object.assign(Error('MUSIC_HOST_ROUTE_REJECTED'), { code: route.reason });
+          throw Object.assign(Error('MUSIC_HOST_ROUTE_REJECTED'), { code: route.reason === 'TVMUSIC_BUSINESS_UNSUPPORTED'
+            ? route.reason : this.#musicOrigin.isBusiness?.(text)
+              ? 'TVMUSIC_BUSINESS_ROUTE_UNAVAILABLE' : route.reason });
         }
         if (!this.#musicOrigin.matches(this.#botId, sender, sessionId)) return;
         if (!this.#musicOrigin.admit({ channel: 'weixin', botId: this.#botId,

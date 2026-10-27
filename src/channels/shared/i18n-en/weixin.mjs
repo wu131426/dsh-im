@@ -3,6 +3,14 @@ import diagnostics from '../../weixin/connection-error.en.mjs';
 export default {
   ...diagnostics,
   // weixin-bridge.mjs
+  'TVmusic 业务入口暂不可用，没有执行下载或本机播放。': 'The TVmusic business route is unavailable. No download or local playback was started.',
+  '本轮没有可核验的 TVmusic 业务结果；如已提交，请先查原请求，不能自动重发。': 'No verifiable TVmusic business result was returned. Check the original request if submitted; do not resend automatically.',
+  'TVmusic 已受理原业务请求；下载或入库完成情况请查后续状态。': 'TVmusic accepted the original business request. Check later status for download or import completion.',
+  'TVmusic 原业务请求仍在处理中；没有重复提交。': 'The original TVmusic business request is still processing and was not submitted twice.',
+  'TVmusic 原业务请求结果待核对；不能换 ID 或自动重发。': 'The original TVmusic business result is unconfirmed. Do not change the ID or resend automatically.',
+  '当前任务控制不受 TVmusic 后端支持，没有伪造停止或执行替代操作。': 'The TVmusic backend does not support this task control. No stop or substitute action was invented.',
+  '请明确片名、年份、季集和操作；本轮没有提交下载或控制。': 'Please clarify the title, year, season or episode, and action. No download or control was submitted.',
+  '原微信消息已绑定另一个业务请求；请先查原回执，不换 ID 或自动重发。': 'The original Weixin message is already bound to a different business request. Check its receipt; do not change the ID or resend.',
   '当前手机会话未绑定 TVmusic 点歌工具，没有改用 Mac 播放。': 'This phone chat is not bound to the TVmusic music tools. Playback was not redirected to the Mac.',
   'TVmusic 点歌工具当前不可用，没有改用 Mac 播放。': 'The TVmusic music tools are unavailable. Playback was not redirected to the Mac.',
   '当前会话的工具模式不支持安全点歌，没有改用 Mac 播放。': 'This Session tool mode does not support safe music requests. Playback was not redirected to the Mac.',
@@ -10,6 +18,7 @@ export default {
   '这条点歌消息含图片或文件，当前不能安全处理；没有改用 Mac 播放。': 'This music request contains an image or file and cannot be handled safely now. Playback was not redirected to the Mac.',
   '这个会话已绑定指定点歌入口，不能由其他聊天共用；没有执行本机工具。': 'This Session is bound to one music chat and cannot be shared by another chat. No local tool was run.',
   '本轮没有可核验的点歌结果；可补充歌曲信息，若已提交则先查原请求。没有改用 Mac 播放。': 'There is no verifiable music result for this turn. You can clarify the song; if a request was submitted, check that original request first. Playback was not redirected to the Mac.',
+  '歌曲搜索结果待核对；先查原搜索，不自动下载或播放。': 'The song search result is unconfirmed. Check the original search; do not download or play automatically.',
   '这条点歌消息已被新请求取代，旧结果不作为播放证明；没有改用 Mac 播放。': 'A newer music request superseded this one. The old result is not playback proof; playback was not redirected to the Mac.',
   '客厅 Sound Pro 播放结果待确认，请先核对原请求；没有改用 Mac 播放。': 'Living-room Sound Pro playback is unconfirmed. Check the original request first; playback was not redirected to the Mac.',
   'TVmusic 报告本次点歌失败，请查看原请求原因；没有改用 Mac 播放。': 'TVmusic reported that this music request failed. Check the original request for the reason; playback was not redirected to the Mac.',

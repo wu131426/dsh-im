@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
-import { createMusicOriginRegistry, installMusicOrigin,
-  musicIntentKind } from '../plugin-src/host/music-origin.mjs';
+import { createMusicOriginRegistry, installMusicOrigin, assertTvmusicHostEnvironment,
+  musicIntentKind, businessIntentKind, businessActionKind } from '../plugin-src/host/music-origin.mjs';
 import { HarnessClient } from '../src/channels/weixin/harness-client.mjs';
 
 function fixture({ ptc = false } = {}) {
@@ -24,6 +24,88 @@ function fixture({ ptc = false } = {}) {
   const append = (type, data) => events.push({ seq: events.length, type, data });
   return { registry, sessionId, agent, events, admit, append };
 }
+
+test('Host refuses broad TVmusic/Infisical environment before scoped music installation', () => {
+  const safe = { HOME: '/isolated', TVMUSIC_HARNESS_URL: 'http://127.0.0.1:4317/',
+    TVMUSIC_IM_SESSION_ID: `session-${randomUUID()}` };
+  assert.doesNotThrow(() => assertTvmusicHostEnvironment(safe));
+  assert.throws(() => assertTvmusicHostEnvironment({ HOME: '/isolated' }), /MUSIC_HOST_ENVIRONMENT_UNSAFE/);
+  for (const [key, value] of [['TVMUSIC_SOUNDPRO_PASSWORD', 'fixture-secret'],
+    ['PROWLARR_API_KEY', 'fixture-secret'], ['INFISICAL_TOKEN', 'fixture-secret'],
+    ['TVMUSIC_MUSIC_HARNESS_CAPABILITY', 'a'.repeat(64)]])
+    assert.throws(() => assertTvmusicHostEnvironment({ ...safe, [key]: value }), /MUSIC_HOST_ENVIRONMENT_UNSAFE/);
+  assert.throws(() => assertTvmusicHostEnvironment({ ...safe,
+    TVMUSIC_HARNESS_URL: 'http://localhost:4317/' }), /MUSIC_HOST_ENVIRONMENT_UNSAFE/);
+});
+
+test('four TVmusic media intents are bounded; queries and other OS requests are not writes', () => {
+  for (const text of ['下载电影《流浪地球》', '追《三体》第二季', '下载综艺《歌手》第三季',
+    '暂停电影下载', '取消追这一季', '我想看电影《流浪地球》',
+    '给我下载电影《流浪地球》']) assert.equal(businessIntentKind(text), 'business', text);
+  for (const text of ['暂停电视剧下载《三体》', '停止电影下载《流浪地球》'])
+    assert.equal(businessActionKind(text), 'unsupported-control', text);
+  for (const text of ['查电影下载进度', '找电视剧《三体》', '下载 Sticker 素材',
+    '运行任意命令', '读取文件', '访问任意 URL', '下载电影《A》但别下载',
+    '下载 Sticker 素材《电影》', '追《三体》第二季还是第三季？',
+    '下载电影《A》和《B》', '下载电影《流浪地球》并用 afplay 播放', '下载电影《流浪地球》第二季',
+    '点看电视剧《三体》', '看《三体》', '下载电影《流浪地球》，先等等',
+    '追《三体》第二季但先等等']) assert.equal(businessIntentKind(text), null, text);
+  assert.equal(musicIntentKind('找周杰伦的歌'), 'search');
+  assert.equal(musicIntentKind('播放周杰伦的七里香然后停止'), 'ambiguous');
+  assert.equal(musicIntentKind('播放周杰伦的七里香。停止'), 'ambiguous');
+  assert.equal(musicIntentKind('停止播放七里香。继续'), 'ambiguous');
+  assert.equal(businessIntentKind('下载电影《流浪地球》。先查资源'), null);
+  assert.equal(businessIntentKind('追《三体》第二季。先查进度'), null);
+  assert.equal(businessIntentKind('播放周杰伦的七里香'), null);
+});
+
+test('verified business call permits only TVmusic writes and returns the durable receipt truth', async () => {
+  const f = fixture(), input = f.admit('下载电影《流浪地球》');
+  f.append('turn/start', { turn: 1 }); f.append('step/start', { turn: 1, step: 1 });
+  f.append('user/message', { role: 'user', source: input.message.source, content: input.message.content });
+  f.append('tool/call', { turn: 1, step: 1, callId: 'watch', name: 'tvmusic_movie_watch' });
+  const call = name => f.registry.guardTool({ agent: f.agent, callId: 'watch', rootCallId: 'watch', name });
+  assert.equal(call('tvmusic_movie_watch'), undefined);
+  assert.notEqual(call('bash'), undefined);
+  assert.notEqual(call('tvmusic_music_play'), undefined);
+  const requestId = createHash('sha256').update(`tvmusic-business-v1:${input.id}`).digest('hex');
+  await f.registry.recordOutcome({ agent: f.agent, callId: 'watch', rootCallId: 'watch',
+    name: 'tvmusic_movie_watch' }, { value: { request_id: requestId, state: 'SUCCEEDED',
+    result: { status: 'DOWNLOADING' } } });
+  assert.deepEqual(f.registry.failureFor(input.rpcId), { reason: 'TVMUSIC_BUSINESS_ACCEPTED' });
+  const dev = f.admit('运行项目测试');
+  f.append('turn/start', { turn: 2 }); f.append('step/start', { turn: 2, step: 1 });
+  f.append('user/message', { role: 'user', source: dev.message.source, content: dev.message.content });
+  f.append('tool/call', { turn: 2, step: 1, callId: 'dev-write', name: 'tvmusic_movie_watch' });
+  assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'dev-write', rootCallId: 'dev-write',
+    name: 'tvmusic_movie_watch' }), 'MUSIC_HOST_LOCAL_FALLBACK_DENIED');
+});
+
+test('ordinal song choice expires after any intervening human message, including late search results', async () => {
+  const f = fixture(), first = f.admit('找周杰伦的七里香歌曲');
+  f.append('turn/start', { turn: 1 }); f.append('step/start', { turn: 1, step: 1 });
+  f.append('user/message', { role: 'user', source: first.message.source, content: first.message.content });
+  f.append('tool/call', { turn: 1, step: 1, callId: 'search-one', name: 'tvmusic_music_search' });
+  const response = { id: first.id, title: '七里香', artist: '周杰伦', status: 'RESULTS',
+    candidates: [{ id: 'a'.repeat(64), name: '周杰伦 - 七里香.flac' }] };
+  await f.registry.recordOutcome({ agent: f.agent, callId: 'search-one', rootCallId: 'search-one',
+    name: 'tvmusic_music_search' }, { value: response });
+  const immediate = f.admit('第一首');
+  assert.equal((await f.registry.verify({ agent: f.agent, message: immediate.message, turn: 2 }))?.selection?.candidate_id,
+    'a'.repeat(64));
+  f.admit('查电影下载进度');
+  const stale = f.admit('第一首');
+  assert.equal((await f.registry.verify({ agent: f.agent, message: stale.message, turn: 3 }))?.selection, undefined);
+  const late = f.admit('找周杰伦的七里香歌曲');
+  f.append('turn/start', { turn: 4 }); f.append('step/start', { turn: 4, step: 1 });
+  f.append('user/message', { role: 'user', source: late.message.source, content: late.message.content });
+  f.append('tool/call', { turn: 4, step: 1, callId: 'search-late', name: 'tvmusic_music_search' });
+  f.admit('查电影下载进度');
+  await f.registry.recordOutcome({ agent: f.agent, callId: 'search-late', rootCallId: 'search-late',
+    name: 'tvmusic_music_search' }, { value: { ...response, id: late.id } });
+  const afterLate = f.admit('第一首');
+  assert.equal((await f.registry.verify({ agent: f.agent, message: afterLate.message, turn: 5 }))?.selection, undefined);
+});
 
 test('original Weixin sender, session and human body are bound to a durable user message', async () => {
   const f = fixture(), input = f.admit('播放周杰伦的七里香');
@@ -84,14 +166,14 @@ test('a queued old tool recorded after a newer step never borrows its origin', a
   assert.equal(await check(newer), false);
 });
 
-test('new music ingress cancels an older queued development bash, but later development is allowed', async () => {
+test('new music ingress fences old development calls and never opens bash in TVmusic Session', async () => {
   const f = fixture(), dev = f.admit('运行项目测试');
   f.append('turn/start', { turn: 1 });
   f.append('step/start', { turn: 1, step: 1 });
   f.append('user/message', { role: 'user', source: dev.message.source, content: dev.message.content });
   f.append('tool/call', { turn: 1, step: 1, callId: 'old-dev', name: 'bash' });
   assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'old-dev',
-    rootCallId: 'old-dev', name: 'bash' }), undefined);
+    rootCallId: 'old-dev', name: 'bash' }), 'MUSIC_HOST_LOCAL_FALLBACK_DENIED');
   f.admit('播放周杰伦的七里香');
   assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'old-dev',
     rootCallId: 'old-dev', name: 'bash' }), 'MUSIC_HOST_STALE_EVENT');
@@ -102,7 +184,7 @@ test('new music ingress cancels an older queued development bash, but later deve
     content: later.message.content });
   f.append('tool/call', { turn: 2, step: 1, callId: 'later-dev', name: 'bash' });
   assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'later-dev',
-    rootCallId: 'later-dev', name: 'bash' }), undefined);
+    rootCallId: 'later-dev', name: 'bash' }), 'MUSIC_HOST_LOCAL_FALLBACK_DENIED');
 });
 
 test('Host guard blocks a music fallback even if TVmusic tools disappear mid-turn', () => {
@@ -122,7 +204,7 @@ test('Host guard blocks a music fallback even if TVmusic tools disappear mid-tur
   f.append('user/message', { role: 'user', source: dev.message.source, content: dev.message.content });
   f.append('tool/call', { turn: 2, step: 1, callId: 'development', name: 'bash' });
   assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'development',
-    rootCallId: 'development', name: 'bash' }), undefined);
+    rootCallId: 'development', name: 'bash' }), 'MUSIC_HOST_LOCAL_FALLBACK_DENIED');
   assert.equal(f.registry.guardTool({ agent: f.agent, callId: 'no-durable-call',
     rootCallId: 'no-durable-call', name: 'bash' }), 'MUSIC_HOST_ORIGIN_UNKNOWN');
   f.registry.close();
@@ -321,7 +403,8 @@ test('Host teardown keeps a root-owned deny tombstone until the approved Agent i
     tools: { get: () => undefined, guard(fn) { guards.add(fn); return () => guards.delete(fn); } },
     on(name, fn) { hooks.set(name, fn); return () => hooks.delete(name); } };
   const pluginCtx = { root, provide() {}, effect(factory) { cleanup = factory(); } };
-  const registry = installMusicOrigin(pluginCtx, { sessionId, botId: 'approved-bot', senderId: 'owner' });
+  const registry = installMusicOrigin(pluginCtx, { sessionId, botId: 'approved-bot', senderId: 'owner' },
+    { TVMUSIC_HARNESS_URL: 'http://127.0.0.1:4317/' });
   assert.equal(guards.size, 1);
   cleanup();
   assert.deepEqual(registry.checkInbound({ botId: 'approved-bot', senderId: 'owner',
