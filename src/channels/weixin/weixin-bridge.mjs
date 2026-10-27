@@ -315,6 +315,8 @@ function musicRouteFailure(reason) {
       return t('当前任务控制不受 TVmusic 后端支持，没有伪造停止或执行替代操作。');
     case 'TVMUSIC_BUSINESS_CLARIFY':
       return t('请明确片名、年份、季集和操作；本轮没有提交下载或控制。');
+    case 'TVMUSIC_BUSINESS_CONFIRM_REQUIRED':
+      return t('请核对具体候选；确认前不会执行下载或追季。');
     case 'TVMUSIC_BUSINESS_CONFLICT':
       return t('原微信消息已绑定另一个业务请求；请先查原回执，不换 ID 或自动重发。');
     case 'MUSIC_HOST_SESSION_UNBOUND':
@@ -335,6 +337,10 @@ function musicRouteFailure(reason) {
       return t('本轮没有可核验的点歌结果；可补充歌曲信息，若已提交则先查原请求。没有改用 Mac 播放。');
     case 'MUSIC_HOST_SEARCH_UNKNOWN':
       return t('歌曲搜索结果待核对；先查原搜索，不自动下载或播放。');
+    case 'MUSIC_HOST_SEARCH_RESULTS':
+      return t('找到以下歌曲候选，只查询、没有播放：');
+    case 'MUSIC_HOST_SEARCH_EMPTY':
+      return t('这次搜索没有可信歌曲候选，没有播放；可补充歌手或版本。');
     case 'MUSIC_HOST_STALE_EVENT':
       return t('这条点歌消息已被新请求取代，旧结果不作为播放证明；没有改用 Mac 播放。');
     case 'MUSIC_HOST_OUTPUT_UNKNOWN':
@@ -378,6 +384,8 @@ function musicRouteFailure(reason) {
 }
 
 function musicFailureText(failure) {
+  if (failure?.reason === 'TVMUSIC_BUSINESS_CONFIRM_REQUIRED' && failure.instruction)
+    return failure.instruction;
   return [musicRouteFailure(failure?.reason)
     ?? t('TVmusic 点歌状态暂不可查，没有改用 Mac 播放。'),
   ...(failure?.instruction ? [failure.instruction] : [])].join(' ');
