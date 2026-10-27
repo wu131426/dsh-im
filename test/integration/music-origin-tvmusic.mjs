@@ -22,6 +22,7 @@ const { installMusicImCandidate } = await import(pathToFileURL(join(
 test('Host admission intent shapes match the exact TVmusic PR39 candidate corpus', () => {
   for (const text of [
     '播放周杰伦的七里香', '播放周杰伦的七里香然后停止', '播放周杰伦的七里香。停止',
+    '放周杰伦的七里香', '给我来一曲周杰伦的七里香',
     '停止播放七里香。继续',
     '点一首刘德华的暗里着迷', '放点周杰伦的歌',
     '来首安静', '想听周杰伦的安静', '放个周杰伦的歌', '改成播放刘德华的暗里着迷',
@@ -40,7 +41,9 @@ test('Host admission intent shapes match the exact TVmusic PR39 candidate corpus
     { assert.equal(hostBusinessIntentKind(text), tvmusicBusinessIntentKind(text), text);
       assert.equal(hostBusinessActionKind(text), tvmusicBusinessActionKind(text), text); }
   for (const text of ['你好', '查 Content OS 发布状态', '找电影《流浪地球》',
-    '查看综艺《歌手》字幕状态', '查影视资源', '查电影下载进度', '下载电影《A》但别下载'])
+    '查看综艺《歌手》字幕状态', '查影视资源', '查电影下载进度',
+    '我想看《沙丘》', '看电影《沙丘》，放周杰伦的七里香',
+    '下载电影《A》但别下载'])
     assert.equal(hostMediaReadIntentKind(text), tvmusicMediaReadIntentKind(text), text);
 });
 
@@ -69,11 +72,15 @@ test('production Host gate blocks old music tools before Agent even when tool na
   await bridge.accept(inbound('cached', '播放周杰伦的七里香'));
   await bridge.accept(inbound('control', '停'));
   await bridge.accept(inbound('movie-read', '找电影《流浪地球》'));
+  await bridge.accept(inbound('colloquial-song', '放周杰伦的七里香'));
+  await bridge.accept(inbound('mixed', '看电影《沙丘》，放周杰伦的七里香'));
   assert.equal(asks.length, 0);
-  assert.equal(sent.length, 3);
+  assert.equal(sent.length, 5);
   assert.match(sent[0], /不可用.*Mac/);
   assert.match(sent[1], /不可用.*Mac/);
   assert.match(sent[2], /业务入口暂不可用.*没有执行下载或本机播放/);
+  assert.match(sent[3], /不可用.*Mac/);
+  assert.match(sent[4], /业务入口暂不可用.*没有执行下载或本机播放/);
   assert.deepEqual(registry.checkInbound({ botId, senderId: 'different-sender', sessionId,
     text: '播放周杰伦的七里香' }), { kind: 'reject', reason: 'MUSIC_HOST_SESSION_SHARED' });
   assert.deepEqual(registry.checkInbound({ botId, senderId: 'different-sender', sessionId,
