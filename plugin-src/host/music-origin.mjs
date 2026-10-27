@@ -376,7 +376,9 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
         return;
       }
       if (record.kind !== 'music') return;
-      if (name === 'tvmusic_music_search') {
+      // A search-shaped tool call from a verified play turn is the prelude to
+      // the same playback intent, not a standalone read-only search result.
+      if (name === 'tvmusic_music_search' && record.musicAction !== 'play') {
         const choices = Array.isArray(value?.candidates) ? value.candidates
           .filter(row => typeof row?.name === 'string' && row.name.length <= 60
             && /^[a-f\d]{64}$/.test(row.id) && !/[\/\r\n]|https?:|token|secret/i.test(row.name))
@@ -402,9 +404,11 @@ export function createMusicOriginRegistry({ sessionId, botId, senderId,
         && !/[\r\n]|https?:|\/Users\/|[A-Za-z]:\\|token|secret|capability/i.test(rawInstruction)
         ? rawInstruction : null;
       let reason = resultReason(value?.status, result?.isError);
-      if (!result?.isError && name === 'tvmusic_music_play' && value?.id !== record.eventId)
+      const playResult = name === 'tvmusic_music_play'
+        || name === 'tvmusic_music_search' && record.musicAction === 'play';
+      if (!result?.isError && playResult && value?.id !== record.eventId)
         reason = 'MUSIC_HOST_RESULT_MISMATCH';
-      if (!result?.isError && name !== 'tvmusic_music_play') {
+      if (!result?.isError && !playResult) {
         const requested = typeof toolArgs?.intent_id === 'string' ? toolArgs.intent_id : null;
         if (value?.status === 'NO_ACTIVE' && !requested) reason = 'MUSIC_HOST_NO_ACTIVE';
         else if (!requested && !value?.id && value?.status === 'UNKNOWN')

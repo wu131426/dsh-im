@@ -302,6 +302,22 @@ test('Host records actual TVmusic tool failure for a deterministic phone reply, 
   assert.deepEqual(f.registry.failureFor(song.rpcId), { reason: 'MUSIC_HOST_RESULT_MISMATCH' });
 });
 
+test('a search tool result for an original play request reports playback progress, never empty-source clarification', async () => {
+  const f = fixture(), song = f.admit('播放周杰伦的安静');
+  f.append('turn/start', { turn: 1 }); f.append('step/start', { turn: 1, step: 1 });
+  f.append('user/message', { role: 'user', source: song.message.source, content: song.message.content });
+  f.append('tool/call', { turn: 1, step: 1, callId: 'play-prelude', name: 'tvmusic_music_search' });
+  const exec = { agent: f.agent, callId: 'play-prelude', rootCallId: 'play-prelude',
+    name: 'tvmusic_music_search', arguments: { title: '安静', artist: '周杰伦' } };
+  assert.equal(f.registry.guardTool(exec), undefined);
+  await f.registry.recordOutcome(exec, { value: { id: song.id, status: 'SEARCHING', target: 'soundpro' } });
+  assert.deepEqual(f.registry.failureFor(song.rpcId), { reason: 'MUSIC_HOST_PREPARING' });
+  await f.registry.recordOutcome(exec, { value: { id: song.id, status: 'ACCEPTED', target: 'soundpro' } });
+  assert.deepEqual(f.registry.failureFor(song.rpcId), { reason: 'MUSIC_HOST_ACCEPTED' });
+  await f.registry.recordOutcome(exec, { value: { id: randomUUID(), status: 'ACCEPTED' } });
+  assert.deepEqual(f.registry.failureFor(song.rpcId), { reason: 'MUSIC_HOST_RESULT_MISMATCH' });
+});
+
 test('status of an older intent never becomes new-song proof, including NO_ACTIVE', async () => {
   const f = fixture(), input = f.admit('播放另一首歌'), olderId = randomUUID();
   f.append('turn/start', { turn: 1 });

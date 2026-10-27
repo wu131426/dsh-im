@@ -118,7 +118,8 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
     async tasks() { return { items: [] }; },
     async submit(command) { writes.push(command); return { schema_version: 1, request_id: command.request_id,
       operation: command.operation, state: 'SUCCEEDED', result: { status: 'DOWNLOADING' } }; } };
-  const musicClient = { async search(input) { return { id: input.id, title: input.title,
+  const musicSearches = [];
+  const musicClient = { async search(input) { musicSearches.push(input); return { id: input.id, title: input.title,
       artist: input.artist, status: 'RESULTS', candidates: [{ id: 'a'.repeat(64), name: '周杰伦 - 七里香.flac' }] }; },
     async begin(input) { writes.push({ operation: 'music.play', ...input });
       return { id: input.id, status: 'ACCEPTED', target: 'soundpro' }; },
@@ -157,6 +158,7 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
               : body.includes('Content OS') ? ['content_os_read', {}]
               : body.includes('并下载') ? ['tvmusic_movie_watch', { tmdb_id: 10 }]
                 : body.startsWith('找周杰伦') ? ['tvmusic_music_search', { title: '七里香', artist: '周杰伦' }]
+                  : body.startsWith('播放周杰伦的安静') ? ['tvmusic_music_search', { title: '安静', artist: '周杰伦' }]
                   : body === '第一首' ? ['tvmusic_music_play', {}]
                     : body.includes('周杰伦') ? ['tvmusic_music_play', { title: '七里香', artist: '周杰伦' }]
         : body.includes('电影《') ? ['tvmusic_movie_watch', { tmdb_id: 10 }]
@@ -215,4 +217,17 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
   assert.equal(writes.at(-1).title, '七里香');
   assert.equal(writes.at(-1).artist, '周杰伦');
   assert.equal(writes.at(-1).candidate_id, 'a'.repeat(64));
+  const beforeVoice = writes.length, beforeSearch = musicSearches.length;
+  for (const [id, text] of [['voice-one', '播放周杰伦的安静'],
+    ['voice-two', '播放周杰伦的安静在大厅的小米音箱']]) {
+    await bridge.accept(inbound(id, text));
+    assert.doesNotMatch(sent.at(-1), /搜索源为空|音乐源为空/);
+  }
+  assert.equal(writes.length, beforeVoice + 2);
+  assert.equal(musicSearches.length, beforeSearch); // Search-shaped calls were play preludes.
+  assert.ok(writes.slice(-2).every(row => row.operation === 'music.play'
+    && row.title === '安静' && row.artist === '周杰伦'));
+  assert.equal(new Set(writes.slice(-2).map(row => row.id)).size, 2);
+  await bridge.accept(inbound('voice-two', '播放周杰伦的安静在大厅的小米音箱'));
+  assert.equal(writes.length, beforeVoice + 2); // Duplicate delivery cannot submit again.
 });
