@@ -74,8 +74,9 @@ export function musicIntentKind(value) {
   if (text.startsWith('<dsh_im_')) return 'ambiguous';
   if (/(?:后|然后|并且|顺便).{0,50}(?:来(?:一)?首|点(?:一)?首|播放|放|想听)/.test(text)) return 'ambiguous';
   if (/^(?:帮我)?(?:写|修复|解释|分析|测试|查看|检查|如何|怎么|生成)(?:一|这|个|段|下|份|条|些|种|轮|次|本|套|：|:|\s)/.test(text)) return null;
-  if (/^(?:(?:请|给我|帮我|我)\s*)?放[^，。！？\n]{2,12}的[^，。！？\n]{2,30}/.test(text)
-    && !/(?:灯|空调|电视|文件|图片)(?:$|[，。！？])/.test(text))
+  const bareSong = /^(?:(?:请|给我|帮我|我)\s*)?放([^，。！？\n]{2,12})的([^，。！？\n]{2,30})/.exec(text);
+  if (bareSong && !/(?:Content|Sticker|\bOS\b|我|客厅|卧室|房间|电影|影片|影视|电视剧|剧集|综艺|文件|目录|图片|日志|工作|项目)/i.test(bareSong[1])
+    && !/^(?:文件|日志|图片|目录|素材|电影|影片|影视|电视剧|剧集|综艺|电视|空调|灯)/.test(bareSong[2]))
     return /[，。！？；;]|(?:然后|接着|随后|再放|别放|不要)/.test(text) ? 'ambiguous' : 'play';
   if (/^(?:(?:请帮我|请|帮我|给我|我)\s*)?(?:改成|换成|继续|停止|暂停)?(?:播放|放点|放)?(?:这部|一部)?(?:电影|影片|影视|视频|电视剧|剧集|综艺)/.test(text)) return null;
   if (/^(?:取消|算了|不用了|不听了|先别放|别放了|不要放了|把(?:这首歌|音乐|音箱)(?:给我)?(?:关了|关掉|停掉)|关掉(?:音乐|音箱))$/.test(text)) return 'control';
@@ -135,6 +136,7 @@ export function mediaReadIntentKind(value) {
   return /^(?:(?:请|帮我|给我)\s*)?(?:查|查询|搜索|找|看看|看下|查看|显示|了解|汇报|告诉我)(?:一下|下)?(?:一部|这部)?(?:电影|影片|影视|电视剧|剧集|综艺|《[^》]{1,100}》|\s*TVmusic\s*(?:的)?\s*(?:电影|影片|影视|电视剧|剧集|综艺|任务|进度|状态))/.test(text)
     || /^(?:电影|影片|影视|电视剧|剧集|综艺)《[^》]{1,100}》/.test(text)
     || /^(?:(?:请|帮我|给我|我想|我要|想)\s*)?(?:看|点看|追|播放|放|下载)(?:这部|一部)?(?:电影|影片|影视|电视剧|剧集|综艺|《[^》]{1,100}》)/.test(text)
+    || /^放(?:我|你|他|她)?(?:喜欢|收藏|想看)的(?:电影|影片|影视|电视剧|剧集|综艺)/.test(text)
     ? 'read' : null;
 }
 const tvmusicIntent = text => musicIntentKind(text) || businessIntentKind(text) || mediaReadIntentKind(text);

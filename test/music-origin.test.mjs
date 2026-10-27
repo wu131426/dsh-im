@@ -59,10 +59,12 @@ test('four TVmusic media intents are bounded; queries and other OS requests are 
   assert.equal(businessIntentKind('播放周杰伦的七里香'), null);
   for (const text of ['查电影下载进度', '找电视剧《三体》', '查看综艺《向往的生活》字幕状态',
     '查询 TVmusic 任务', '查影视资源', '电影《流浪地球》资源', '播放电影《流浪地球》',
-    '我想看《沙丘》', '看电影《沙丘》，放周杰伦的七里香'])
+    '我想看《沙丘》', '看电影《沙丘》，放周杰伦的七里香',
+    '放电影《沙丘》的预告', '放我喜欢的电影'])
     assert.equal(mediaReadIntentKind(text), 'read', text);
   for (const text of ['你好', '查 Content OS 发布状态', '查看 Sticker 项目', '运行项目测试',
-    '帮我写一段“播放七里香”的测试文案', '放我房间的灯'])
+    '帮我写一段“播放七里香”的测试文案', '放我房间的灯',
+    '放 Content OS 的文件到桌面', '放 Content OS 的日志'])
     assert.equal(mediaReadIntentKind(text), null, text);
 });
 
@@ -399,6 +401,8 @@ test('bounded safety classification distinguishes song requests from explicit no
   for (const text of ['运行项目测试', '修复音乐页面代码', '查看电影任务', '检查服务日志'])
     assert.equal(musicIntentKind(text), null);
   assert.equal(musicIntentKind('放我房间的灯'), null);
+  for (const text of ['放 Content OS 的文件到桌面', '放 Content OS 的日志',
+    '放电影《沙丘》的预告', '放我喜欢的电影']) assert.equal(musicIntentKind(text), null, text);
 });
 
 test('inbound gate protects TVmusic requests, not the whole Weixin/Harness Session', () => {
@@ -428,6 +432,8 @@ test('inbound gate protects TVmusic requests, not the whole Weixin/Harness Sessi
     '我想看《沙丘》', '看电影《沙丘》，放周杰伦的七里香'])
     assert.deepEqual(missing.checkInbound({ ...scoped, text }),
       { kind: 'reject', reason: 'MUSIC_HOST_TOOLS_UNAVAILABLE' }, text);
+  assert.deepEqual(missing.checkInbound({ ...scoped, text: '放 Content OS 的文件到桌面' }),
+    { kind: 'allow' });
   const ptc = createMusicOriginRegistry({ ...scoped, modeOf: () => 'ptc', toolsReady: () => true });
   assert.deepEqual(ptc.checkInbound({ ...scoped, text: '放点周杰伦的歌' }),
     { kind: 'reject', reason: 'MUSIC_HOST_MODE_UNSUPPORTED' });

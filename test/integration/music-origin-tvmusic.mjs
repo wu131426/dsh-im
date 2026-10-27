@@ -43,6 +43,8 @@ test('Host admission intent shapes match the exact TVmusic PR39 candidate corpus
   for (const text of ['你好', '查 Content OS 发布状态', '找电影《流浪地球》',
     '查看综艺《歌手》字幕状态', '查影视资源', '查电影下载进度',
     '我想看《沙丘》', '看电影《沙丘》，放周杰伦的七里香',
+    '放 Content OS 的文件到桌面', '放 Content OS 的日志',
+    '放电影《沙丘》的预告', '放我喜欢的电影',
     '下载电影《A》但别下载'])
     assert.equal(hostMediaReadIntentKind(text), tvmusicMediaReadIntentKind(text), text);
 });
