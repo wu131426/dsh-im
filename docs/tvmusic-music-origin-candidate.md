@@ -1,5 +1,17 @@
 # TVmusic IM origin Host candidate (not installed)
 
+## 2026-10-28 最小拆分候选（未安装）
+
+TVmusic 专属分类、工具白名单、来源登记、结果解释和手机文案现由
+`tvmusic-os/dsh/weixin-origin-candidate` 独立插件持有。dsh-im 的微信桥只接收
+`verifiedRoute` 通用接口；Host 配置必须显式设置
+`verifiedRouteService: tvmusicWeixinRoute`，并在**私有测试 profile**中给 TVmusic
+origin 插件配置 `botId`、原始微信 `from_user_id`（`senderId`，不是 `p2p:` 会话键）
+和现有 `sessionId`；作用域工具插件也需同一 `sessionId`。这些身份值不得写进 Git。
+旧 `musicOrigin` 配置现在启动即拒绝，不能静默当作已接线。缺服务、缺作用域或
+业务合同不匹配时不得提供写工具或本机播放器退路。正式 desktop profile 未改；
+下文旧 `musicOrigin` 安装说明仅为历史记录，不能照做。
+
 2026-10-27 通用微信入口修正：`musicOrigin.senderId` 必须是已有微信入口的
 原始 `from_user_id`，而非持久 Session 键的 `p2p:` 前缀版本。实测错误绑定曾
 在 Agent 前回“这个会话已绑定指定点歌入口”，TVmusic 未收到意图。守卫现按

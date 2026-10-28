@@ -24,7 +24,7 @@ export class BusyMessageDispatcher {
     control, signal, enhancement, pendingInteraction, acceptedMessageIds,
     mode = harness.currentBusyMessageMode?.(), onFailure,
     enqueue, isQueued, send, logger = console, onSteered, onError,
-    beforeSteer, claimMusicOrigin, revokeMusicOrigin,
+    beforeSteer, claimVerifiedIngress, revokeVerifiedIngress,
   }) {
     // Read once, before any await: a settings change cannot reinterpret this input.
     const steer = normalizeBusyMessageMode(mode) === 'steer'
@@ -64,7 +64,7 @@ export class BusyMessageDispatcher {
       }
       const submitted = await steerMessage(text, harness, state, key, {
         signal, control, enhancement, pendingInteraction: pendingInteraction(),
-        claimMusicOrigin, revokeMusicOrigin,
+        claimVerifiedIngress, revokeVerifiedIngress,
       });
       if (!submitted) return queue(true);
       // Submission is final even if its receipt fails.

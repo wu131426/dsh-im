@@ -6,13 +6,17 @@ import { Context } from '@deepseek-ai/cordis';
 import { setImHostLanguage } from '../src/channels/shared/i18n.mjs';
 import { createImHostPlugin, inject, name } from '../plugin-src/host/index.mjs';
 
-process.env.TVMUSIC_HARNESS_URL = 'http://127.0.0.1:4317/'; // Synthetic Host scope; no service request.
-
 const NO_CHANNELS = Object.freeze({
   applyFeishu: async () => {}, applyWeixin: async () => {}, applyDingtalk: async () => {},
   applyWecom: async () => {}, applyWecomApp: async () => {}, applyQq: async () => {},
   applySlack: async () => {}, applyDiscord: async () => {}, applyWhatsapp: async () => {},
   applyIMessage: async () => {}, applyOffice: async () => {},
+});
+const verifiedRoute = Object.freeze({
+  checkInbound: () => ({ kind: 'allow' }), matches: () => true, admit: () => true,
+  revokeOrigin() {}, revokeSession() {}, failureFor: () => null,
+  formatInbound: () => '受控入口暂不可用', formatOutcome: () => '原请求待核',
+  formatError: () => null, formatBatch: () => '批量不支持', isScoped: () => false,
 });
 
 test('Host resolves the bot message language before channels start and serves its RPC', async () => {
@@ -113,88 +117,53 @@ test('Host composes IM channels and the AI Office connector inside one plugin co
   ]);
 });
 
-test('opt-in Weixin music Host service has one trusted scope and does not alter other channels', async () => {
-  const sessionId = 'session-00000000-0000-4000-8000-000000000001';
-  const agent = { id: sessionId, session: { id: sessionId, snapshotEvents: () => [] } };
-  const provided = [], channels = [];
-  const ctx = { agents: { get: id => id === sessionId ? agent : undefined },
-    tools: { get: (name) => name === 'run_code' ? undefined : { name },
-      guard() { return () => {}; } },
-    on() { return () => {}; }, provide: (...entry) => provided.push(entry), effect() {} };
-  await createImHostPlugin({ ...NO_CHANNELS,
-    applyWeixin: async (_ctx, config) => channels.push(['weixin', config.musicOrigin]),
-    applyTelegram: async (_ctx, config) => channels.push(['telegram', config.musicOrigin]),
-    createDeliveryService: () => ({}),
-  }).apply(ctx, { musicOrigin: { sessionId, botId: 'approved-bot', senderId: 'owner-user' } });
-  const service = provided.find(([name]) => name === 'dshImMusicOrigin')?.[1];
-  assert.equal(service.contractVersion, 1);
-  assert.equal(typeof service.verify, 'function');
-  assert.equal(typeof service.verifyExecution, 'function');
-  assert.deepEqual(channels.find(([name]) => name === 'weixin')[1].checkInbound({
-    botId: 'approved-bot', senderId: 'owner-user', sessionId,
-    text: '播放周杰伦的七里香',
-  }), { kind: 'allow' });
+test('Host passes an opt-in verified route only to Weixin, leaving other channels unchanged', async () => {
+  const channels = [];
+  const ctx = { verifiedRouteFixture: verifiedRoute, provide() {}, effect() {} };
+  await createImHostPlugin({ ...NO_CHANNELS, createDeliveryService: () => ({}),
+    applyWeixin: async (_ctx, config) => channels.push(['weixin', config.verifiedRoute]),
+    applyTelegram: async (_ctx, config) => channels.push(['telegram', config.verifiedRoute]),
+  }).apply(ctx, { verifiedRouteService: 'verifiedRouteFixture' });
+  assert.equal(channels.find(([name]) => name === 'weixin')[1], verifiedRoute);
   assert.equal(channels.find(([name]) => name === 'telegram')[1], undefined);
 });
 
-test('opt-in music cannot report a ready Host when Weixin startup failed', async () => {
-  const sessionId = 'session-00000000-0000-4000-8000-000000000001';
-  const ctx = { agents: { get: () => undefined },
-    tools: { get: () => undefined, guard: () => () => {} },
-    on: () => () => {}, provide() {}, effect() {} };
-  await assert.rejects(createImHostPlugin({ ...NO_CHANNELS,
-    createDeliveryService: () => ({}),
-    applyWeixin: async () => { throw Error('WEIXIN_OFFLINE'); },
-  }).apply(ctx, { musicOrigin: { sessionId, botId: 'approved-bot', senderId: 'owner-user' } }),
-  /MUSIC_HOST_WEIXIN_UNAVAILABLE/);
+test('missing or incomplete verified route cannot start the scoped Weixin channel', async () => {
+  const plugin = createImHostPlugin({ ...NO_CHANNELS, createDeliveryService: () => ({}),
+    applyWeixin: async () => assert.fail('must not start without route'),
+  });
+  await assert.rejects(plugin.apply({ provide() {}, effect() {} },
+    { verifiedRouteService: 'missingRoute' }), /VERIFIED_ROUTE_UNAVAILABLE/);
+  await assert.rejects(plugin.apply({ incompleteRoute: { checkInbound() {} }, provide() {}, effect() {} },
+    { verifiedRouteService: 'incompleteRoute' }), /VERIFIED_ROUTE_UNAVAILABLE/);
+  await assert.rejects(plugin.apply({ provide() {}, effect() {} },
+    { musicOrigin: { sessionId: 'old-session', senderId: 'old-sender' } }),
+  /VERIFIED_ROUTE_LEGACY_CONFIG_UNSUPPORTED/);
 });
 
-test('real Cordis injection exposes scoped music proof only after core Agent/tool services exist', async t => {
-  const ctx = new Context(), sessionId = 'session-00000000-0000-4000-8000-000000000001';
-  const guards = new Set();
+test('real Cordis waits for the verified route service before mounting Weixin', async t => {
+  const ctx = new Context(), mounted = [];
   for (const [name, service] of Object.entries({
     connection: { fetch: { register: () => async () => {} } }, credentials: {},
     typertGateway: { stream() {} }, sessionController: {}, workspaceController: {},
-    agents: { get: id => id === sessionId ? { id, session: { id, snapshotEvents: () => [] } } : undefined },
-    tools: { get: name => name === 'run_code' ? undefined : { name },
-      guard(fn) { guards.add(fn); return () => guards.delete(fn); } },
+    agents: { get: () => undefined }, tools: { get: () => undefined, guard: () => () => {} },
   })) ctx.provide(name, service);
-  const mounted = [];
   const host = ctx.plugin(createImHostPlugin({ ...NO_CHANNELS,
     createDeliveryService: () => ({}),
-    applyWeixin: async (_scope, config) => mounted.push(config.musicOrigin),
-  }), { musicOrigin: { sessionId, botId: 'approved-bot', senderId: 'owner-user' } });
+    applyWeixin: async (_scope, config) => mounted.push(config.verifiedRoute),
+  }), { verifiedRouteService: 'verifiedRouteFixture' });
   t.after(() => host.dispose());
+  assert.equal(mounted.length, 0);
+  ctx.provide('verifiedRouteFixture', verifiedRoute);
   await host.await();
-  let proof;
-  const consumer = ctx.plugin({ name: 'music-origin-isolated-consumer',
-    inject: ['dshImMusicOrigin'], apply(scope) { proof = scope.dshImMusicOrigin; } });
-  t.after(() => consumer.dispose());
-  await consumer.await();
-  assert.equal(proof.contractVersion, 1);
-  assert.equal(mounted.length, 1);
-  await consumer.dispose();
-  await host.dispose();
-  assert.equal(guards.size, 1); // Root tombstone remains while the Agent is live.
+  assert.deepEqual(mounted, [verifiedRoute]);
 });
 
-test('real Cordis startup fails closed when opt-in Weixin cannot start', async t => {
-  const ctx = new Context(), sessionId = 'session-00000000-0000-4000-8000-000000000002';
-  const guards = new Set();
-  for (const [name, service] of Object.entries({
-    connection: { fetch: { register: () => async () => {} } }, credentials: {},
-    typertGateway: { stream() {} }, sessionController: {}, workspaceController: {},
-    agents: { get: id => id === sessionId ? { id, session: { id, snapshotEvents: () => [] } } : undefined },
-    tools: { get: name => name === 'run_code' ? undefined : { name },
-      guard(fn) { guards.add(fn); return () => guards.delete(fn); } },
-  })) ctx.provide(name, service);
-  const host = ctx.plugin(createImHostPlugin({ ...NO_CHANNELS,
-    createDeliveryService: () => ({}),
+test('verified Weixin startup failure is never reported as a ready Host', async () => {
+  await assert.rejects(createImHostPlugin({ ...NO_CHANNELS, createDeliveryService: () => ({}),
     applyWeixin: async () => { throw Error('ISOLATED_WEIXIN_OFFLINE'); },
-  }), { musicOrigin: { sessionId, botId: 'approved-bot', senderId: 'owner-user' } });
-  t.after(() => host.dispose());
-  await assert.rejects(host.await(), /MUSIC_HOST_WEIXIN_UNAVAILABLE/);
-  assert.equal(guards.size, 1); // Root-owned closed deny tombstone until Agent disposal.
+  }).apply({ verifiedRouteFixture: verifiedRoute, provide() {}, effect() {} },
+    { verifiedRouteService: 'verifiedRouteFixture' }), /VERIFIED_ROUTE_WEIXIN_UNAVAILABLE/);
 });
 
 test('Host provides #65 and installs #84 with the same delivery service', async () => {

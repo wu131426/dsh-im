@@ -299,97 +299,6 @@ export function createWeixinBridgeStatus() {
   };
 }
 
-function musicRouteFailure(reason) {
-  switch (reason) {
-    case 'TVMUSIC_BUSINESS_ROUTE_UNAVAILABLE':
-      return t('TVmusic 业务入口暂不可用，没有执行下载或本机播放。');
-    case 'TVMUSIC_BUSINESS_NO_RESULT':
-      return t('本轮没有可核验的 TVmusic 业务结果；如已提交，请先查原请求，不能自动重发。');
-    case 'TVMUSIC_BUSINESS_ACCEPTED':
-      return t('TVmusic 已受理原业务请求；下载或入库完成情况请查后续状态。');
-    case 'TVMUSIC_BUSINESS_PREPARING':
-      return t('TVmusic 原业务请求仍在处理中；没有重复提交。');
-    case 'TVMUSIC_BUSINESS_UNKNOWN':
-      return t('TVmusic 原业务请求结果待核对；不能换 ID 或自动重发。');
-    case 'TVMUSIC_BUSINESS_UNSUPPORTED':
-      return t('当前任务控制不受 TVmusic 后端支持，没有伪造停止或执行替代操作。');
-    case 'TVMUSIC_BUSINESS_CLARIFY':
-      return t('请明确片名、年份、季集和操作；本轮没有提交下载或控制。');
-    case 'TVMUSIC_BUSINESS_CONFIRM_REQUIRED':
-      return t('请核对具体候选；确认前不会执行下载或追季。');
-    case 'TVMUSIC_BUSINESS_CONFLICT':
-      return t('原微信消息已绑定另一个业务请求；请先查原回执，不换 ID 或自动重发。');
-    case 'MUSIC_HOST_SESSION_UNBOUND':
-      return t('当前手机会话未绑定 TVmusic 点歌工具，没有改用 Mac 播放。');
-    case 'MUSIC_HOST_TOOLS_UNAVAILABLE':
-      return t('TVmusic 点歌工具当前不可用，没有改用 Mac 播放。');
-    case 'MUSIC_HOST_MODE_UNSUPPORTED':
-      return t('当前会话的工具模式不支持安全点歌，没有改用 Mac 播放。');
-    case 'MUSIC_HOST_ORIGIN_ADMISSION_FAILED':
-      return t('TVmusic 点歌状态暂不可查，没有改用 Mac 播放。');
-    case 'MUSIC_HOST_INPUT_UNSUPPORTED':
-      return t('这条点歌消息含图片或文件，当前不能安全处理；没有改用 Mac 播放。');
-    case 'MUSIC_HOST_SESSION_SHARED':
-      return t('这个会话已绑定指定点歌入口，不能由其他聊天共用；没有执行本机工具。');
-    case 'MUSIC_HOST_BATCH_UNSUPPORTED':
-      return t('当前点歌会话暂不接受批量消息，请单条发送；没有改用 Mac 播放。');
-    case 'MUSIC_HOST_NO_RESULT':
-      return t('本轮没有可核验的点歌结果；可补充歌曲信息，若已提交则先查原请求。没有改用 Mac 播放。');
-    case 'MUSIC_HOST_SEARCH_UNKNOWN':
-      return t('歌曲搜索结果待核对；先查原搜索，不自动下载或播放。');
-    case 'MUSIC_HOST_SEARCH_RESULTS':
-      return t('找到以下歌曲候选，只查询、没有播放：');
-    case 'MUSIC_HOST_SEARCH_EMPTY':
-      return t('这次搜索没有可信歌曲候选，没有播放；可补充歌手或版本。');
-    case 'MUSIC_HOST_STALE_EVENT':
-      return t('这条点歌消息已被新请求取代，旧结果不作为播放证明；没有改用 Mac 播放。');
-    case 'MUSIC_HOST_OUTPUT_UNKNOWN':
-      return t('客厅 Sound Pro 播放结果待确认，请先核对原请求；没有改用 Mac 播放。');
-    case 'MUSIC_HOST_TOOL_FAILED':
-      return t('TVmusic 报告本次点歌失败，请查看原请求原因；没有改用 Mac 播放。');
-    case 'MUSIC_HOST_PREPARING':
-      return t('TVmusic 正在准备这首歌，尚未确认音箱出声。');
-    case 'MUSIC_HOST_READY':
-      return t('歌曲文件已就绪，音箱是否出声仍待确认。');
-    case 'MUSIC_HOST_ACCEPTED':
-      return t('Sound Pro 已接受播放请求，尚未取得出声证明。');
-    case 'MUSIC_HOST_PLAYING_REPORTED':
-      return t('设备状态已关联到本次播放请求；本轮未单独实听。');
-    case 'MUSIC_HOST_PAUSED_REPORTED':
-      return t('TVmusic 报告本次播放已暂停，未在本轮现场复听。');
-    case 'MUSIC_HOST_STOPPED_REPORTED':
-      return t('TVmusic 报告本次请求已停止，未在本轮现场复听。');
-    case 'MUSIC_HOST_CLARIFY':
-      return t('歌曲或版本还需确认，尚未开始播放。');
-    case 'MUSIC_HOST_RESULT_MISMATCH':
-      return t('TVmusic 返回的不是这次指定的请求，不能作为本次播放证明；请核对原请求。');
-    case 'MUSIC_HOST_OTHER_PLAYING':
-      return t('所查原播放请求报告播放中，不代表这次点歌已经开始。');
-    case 'MUSIC_HOST_OTHER_PAUSED':
-      return t('TVmusic 报告所查原播放请求已暂停，未在本轮现场复听。');
-    case 'MUSIC_HOST_OTHER_STOPPED':
-      return t('TVmusic 报告所查原播放请求已停止，未在本轮现场复听。');
-    case 'MUSIC_HOST_OTHER_PENDING':
-      return t('所查原播放请求有进展，不代表这次点歌已提交或出声。');
-    case 'MUSIC_HOST_OTHER_UNKNOWN':
-      return t('所查原播放请求状态待确认，不代表这次点歌已开始。');
-    case 'MUSIC_HOST_OTHER_FAILED':
-      return t('所查原播放请求报告失败，不代表这次点歌的结果。');
-    case 'MUSIC_HOST_OTHER_CLARIFY':
-      return t('所查原播放请求还需确认歌曲或版本，不代表这次点歌已开始。');
-    case 'MUSIC_HOST_NO_ACTIVE':
-      return t('当前会话没有可确认的活跃音乐请求；没有自动开始新播放。');
-    default: return null;
-  }
-}
-
-function musicFailureText(failure) {
-  if (failure?.reason === 'TVMUSIC_BUSINESS_CONFIRM_REQUIRED' && failure.instruction)
-    return failure.instruction;
-  return [musicRouteFailure(failure?.reason)
-    ?? t('TVmusic 点歌状态暂不可查，没有改用 Mac 播放。'),
-  ...(failure?.instruction ? [failure.instruction] : [])].join(' ');
-}
 
 export class WeixinHarnessBridge {
   #api;
@@ -401,7 +310,7 @@ export class WeixinHarnessBridge {
   #deferred;
   #contextEnhancement;
   #accessPolicy;
-  #musicOrigin;
+  #verifiedRoute;
   #botId;
   #status;
   #logger;
@@ -437,7 +346,7 @@ export class WeixinHarnessBridge {
     state,
     contextEnhancement,
     accessPolicy,
-    musicOrigin,
+    verifiedRoute,
     botId,
     status = createWeixinBridgeStatus(),
     logger = console,
@@ -460,7 +369,7 @@ export class WeixinHarnessBridge {
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
-    this.#musicOrigin = musicOrigin;
+    this.#verifiedRoute = verifiedRoute;
     this.#botId = botId;
     this.#status = status;
     this.#logger = logger;
@@ -478,39 +387,32 @@ export class WeixinHarnessBridge {
     return structuredClone(this.#status);
   }
 
-  #musicRoute(sender, sessionId, text, hasMedia = false) {
-    if (!this.#musicOrigin) return { kind: 'allow' };
-    const route = this.#musicOrigin.checkInbound({ botId: this.#botId,
+  #verifiedRouteCheck(sender, sessionId, text, hasMedia = false) {
+    if (!this.#verifiedRoute) return { kind: 'allow' };
+    const route = this.#verifiedRoute.checkInbound({ botId: this.#botId,
       senderId: sender, sessionId, text, hasMedia });
     if (route.kind !== 'reject') return route;
-    const reason = (route.reason === 'TVMUSIC_BUSINESS_UNSUPPORTED'
-      ? musicRouteFailure(route.reason) : this.#musicOrigin.isBusiness?.(text)
-      ? musicRouteFailure('TVMUSIC_BUSINESS_ROUTE_UNAVAILABLE') : musicRouteFailure(route.reason))
-      ?? t('TVmusic 点歌状态暂不可查，没有改用 Mac 播放。');
-    const controlHint = this.#musicOrigin.isControl?.(text)
-      ? ` ${t('音箱状态未确认，可能仍在播放；请在原设备手动核对。')}` : '';
-    return { ...route, reply: reason + controlHint };
+    return { ...route, reply: this.#verifiedRoute.formatInbound(route, text, t) };
   }
 
-  #musicClaim(sender, text, onClaim, onFailure) {
-    if (!this.#musicOrigin) return {};
+  #verifiedClaim(sender, text, onClaim, onFailure) {
+    if (!this.#verifiedRoute) return {};
     return {
-      claimMusicOrigin: ({ sessionId, rpcId }) => {
-        const route = this.#musicRoute(sender, sessionId, text);
+      claimVerifiedIngress: ({ sessionId, rpcId }) => {
+        const route = this.#verifiedRouteCheck(sender, sessionId, text);
         if (route.kind === 'reject') {
-          throw Object.assign(Error('MUSIC_HOST_ROUTE_REJECTED'), { code: route.reason === 'TVMUSIC_BUSINESS_UNSUPPORTED'
-            ? route.reason : this.#musicOrigin.isBusiness?.(text)
-              ? 'TVMUSIC_BUSINESS_ROUTE_UNAVAILABLE' : route.reason });
+          throw Object.assign(Error('VERIFIED_ROUTE_REJECTED'), { code: route.reason });
         }
-        if (!this.#musicOrigin.matches(this.#botId, sender, sessionId)) return;
-        if (!this.#musicOrigin.admit({ channel: 'weixin', botId: this.#botId,
+        if (route.claim === false) return;
+        if (!this.#verifiedRoute.matches(this.#botId, sender, sessionId)) return;
+        if (!this.#verifiedRoute.admit({ channel: 'weixin', botId: this.#botId,
           senderId: sender, sessionId, rpcId, text, onFailure })) {
-          throw Object.assign(Error('MUSIC_HOST_ORIGIN_ADMISSION_FAILED'),
-            { code: 'MUSIC_HOST_ORIGIN_ADMISSION_FAILED' });
+          throw Object.assign(Error('VERIFIED_ROUTE_ADMISSION_FAILED'),
+            { code: 'VERIFIED_ROUTE_ADMISSION_FAILED' });
         }
         onClaim?.(rpcId);
       },
-      revokeMusicOrigin: rpcId => this.#musicOrigin.revokeOrigin(rpcId),
+      revokeVerifiedIngress: rpcId => this.#verifiedRoute.revokeOrigin(rpcId),
     };
   }
 
@@ -692,9 +594,10 @@ export class WeixinHarnessBridge {
       enhancement: this.#acceptedMessageIds.get(messageId),
       isQueued: () => this.#queues.has(key),
       enqueue: (options) => this.#enqueueMessage(message, messageId, key, options),
-      beforeSteer: () => this.#musicRoute(sender, this.#state.sessionFor?.(key) ?? null, commandText),
-      ...this.#musicClaim(sender, commandText, undefined,
-        failure => this.#sendOutOfBand(key, sender, musicFailureText(failure), contextToken, runId)),
+      beforeSteer: () => this.#verifiedRouteCheck(sender, this.#state.sessionFor?.(key) ?? null, commandText),
+      ...this.#verifiedClaim(sender, commandText, undefined,
+        failure => this.#sendOutOfBand(key, sender,
+          this.#verifiedRoute.formatOutcome(failure, t), contextToken, runId)),
       send: (reply) => this.#sendOutOfBand(key, sender, reply, contextToken, runId),
       onError: (error) => this.#handleInteractionFailure(message, messageId, error),
     });
@@ -875,7 +778,7 @@ export class WeixinHarnessBridge {
     this.#status.lastMessageAt = new Date().toISOString();
     const steerInstruction = /^\/steer\s+([\s\S]+)/iu.exec(text)?.[1]?.trim();
     if (steerInstruction) {
-      const route = this.#musicRoute(sender, this.#state.sessionFor?.(key) ?? null,
+      const route = this.#verifiedRouteCheck(sender, this.#state.sessionFor?.(key) ?? null,
         steerInstruction, hasWeixinImageItems(message) || hasWeixinFileItems(message));
       if (route.kind === 'reject') {
         await this.#send(sender, route.reply, contextToken, runId);
@@ -891,8 +794,9 @@ export class WeixinHarnessBridge {
         || this.#approvals.hasPending(key),
       busy: this.#queues.has(key) || this.#batchInputs.status(key).phase !== 'idle',
       control: { owner: this, key },
-      ...(steerInstruction ? this.#musicClaim(sender, steerInstruction, undefined,
-        failure => this.#sendOutOfBand(key, sender, musicFailureText(failure), contextToken, runId)) : {}),
+      ...(steerInstruction ? this.#verifiedClaim(sender, steerInstruction, undefined,
+        failure => this.#sendOutOfBand(key, sender,
+          this.#verifiedRoute.formatOutcome(failure, t), contextToken, runId)) : {}),
       deferredDelivery: this.#deferred,
       enhancement: captureContextEnhancementSource(
         this.#contextEnhancement,
@@ -942,17 +846,18 @@ export class WeixinHarnessBridge {
     const runId = typeof message.run_id === 'string' ? message.run_id : undefined;
     let batchSettled = batchSubmission === null;
     let promptRecorded = false;
-    let musicRpcId = null;
+    let routeRpcId = null;
     try {
       const promptMessage = preparedMessage ?? this.#inboundMessage(message);
       const text = promptMessage.content;
       const hasImages = hasInboundImages(promptMessage);
       const hasFiles = hasInboundFiles(promptMessage);
       const hasReply = hasReplyReference(promptMessage);
-      if (batchSubmission?.messages?.some(text => this.#musicOrigin?.isTvmusic(text))) {
+      if (batchSubmission?.messages?.some(text => this.#verifiedRoute?.isScoped(text))) {
         this.#batchInputs.complete(key, batchSubmission.token);
         batchSettled = true;
-        await this.#send(sender, musicRouteFailure('MUSIC_HOST_BATCH_UNSUPPORTED'), contextToken, runId);
+        await this.#send(sender, this.#verifiedRoute.formatBatch(t),
+          contextToken, runId);
         await this.#state.markSeen(messageId);
         return;
       }
@@ -975,7 +880,7 @@ export class WeixinHarnessBridge {
         return;
       }
       if (!hasImages && !hasFiles && command === '/new') {
-        this.#musicOrigin?.revokeSession(this.#state.sessionFor?.(key));
+        this.#verifiedRoute?.revokeSession(this.#state.sessionFor?.(key));
         await this.#state.clearSession(key);
         await this.#send(sender, t('已开启新会话。请发送你的问题。'), contextToken, runId);
         await this.#state.markSeen(messageId);
@@ -1006,8 +911,8 @@ export class WeixinHarnessBridge {
         return;
       }
 
-      if (this.#musicOrigin) {
-        const route = this.#musicRoute(sender, this.#state.sessionFor?.(key) ?? null,
+      if (this.#verifiedRoute) {
+        const route = this.#verifiedRouteCheck(sender, this.#state.sessionFor?.(key) ?? null,
           text, hasImages || hasFiles);
         if (route.kind === 'reject') {
           await this.#send(sender, route.reply, contextToken, runId);
@@ -1051,8 +956,8 @@ export class WeixinHarnessBridge {
           askOptions: {
             timeoutMs: this.#replyTimeoutMs,
             signal: this.#signal,
-            ...(this.#musicOrigin && !hasImages && !hasFiles
-              ? this.#musicClaim(sender, text, rpcId => { musicRpcId = rpcId; }) : {}),
+            ...(this.#verifiedRoute && !hasImages && !hasFiles
+              ? this.#verifiedClaim(sender, text, rpcId => { routeRpcId = rpcId; }) : {}),
             control: { owner: this, key },
             onUpdate: () => this.#resumeTyping(key, sender, contextToken),
             onInteraction: (interaction) => this.#handleInteraction(interaction, {
@@ -1083,15 +988,15 @@ export class WeixinHarnessBridge {
       const answerText = typeof answer === 'string' && answer.trim()
         ? answer
         : artifacts.length > 0 ? t('结果文件已生成。') : answer;
-      const musicFailure = this.#musicOrigin?.failureFor(musicRpcId);
-      const safeMusicAnswer = musicFailure && musicFailureText(musicFailure);
+      const routeOutcome = this.#verifiedRoute?.failureFor(routeRpcId);
+      const scopedAnswer = routeOutcome && this.#verifiedRoute.formatOutcome(routeOutcome, t);
       let textDeliveryError = null;
       let textReceipt = null;
       try {
         textReceipt = createDeliveryReceipt({
           deliveryId: messageId,
           presentation: 'weixin-text',
-          providerMessageIds: await this.#send(sender, safeMusicAnswer ?? answerText, contextToken, runId),
+          providerMessageIds: await this.#send(sender, scopedAnswer ?? answerText, contextToken, runId),
         });
       } catch (error) {
         textDeliveryError = channelDeliveryFailure(error);
@@ -1136,7 +1041,7 @@ export class WeixinHarnessBridge {
       }
       if (this.#signal?.aborted) return;
       this.#status.lastError = error?.message ?? String(error);
-      const userMessage = musicRouteFailure(error?.code) ?? inboundFileUserMessage(error)
+      const userMessage = this.#verifiedRoute?.formatError(error?.code, t) ?? inboundFileUserMessage(error)
         ?? imagePromptUserMessage(error);
       const imageDiagnostic = imagePromptDiagnostic(error);
       const sendFailureOptions = weixinSendFailureOptions(error);
