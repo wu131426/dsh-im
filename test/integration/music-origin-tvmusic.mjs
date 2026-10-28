@@ -5,13 +5,16 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { installMusicOrigin, musicIntentKind as hostMusicIntentKind,
-  businessIntentKind as hostBusinessIntentKind,
-  businessActionKind as hostBusinessActionKind,
-  mediaReadIntentKind as hostMediaReadIntentKind } from '../../plugin-src/host/music-origin.mjs';
+import { Context } from '@deepseek-ai/cordis';
+import { createImHostPlugin } from '../../plugin-src/host/index.mjs';
 import { WeixinHarnessBridge } from '../../src/channels/weixin/weixin-bridge.mjs';
 
 if (!process.env.TVMUSIC_PR39_ROOT) throw Error('TVMUSIC_PR39_ROOT is required for isolated PR #39 integration');
+const { installMusicOrigin, musicIntentKind: hostMusicIntentKind,
+  businessIntentKind: hostBusinessIntentKind,
+  businessActionKind: hostBusinessActionKind,
+  mediaReadIntentKind: hostMediaReadIntentKind } = await import(pathToFileURL(join(
+  process.env.TVMUSIC_PR39_ROOT, 'plugins/dsh-weixin-origin-candidate.mjs')).href);
 const { musicIntentKind: tvmusicMusicIntentKind, businessIntentKind: tvmusicBusinessIntentKind,
   businessActionKind: tvmusicBusinessActionKind,
   mediaReadIntentKind: tvmusicMediaReadIntentKind } = await import(pathToFileURL(join(
@@ -63,7 +66,7 @@ const registry = installMusicOrigin(ctx, { sessionId, botId, senderId },
 const bridge = new WeixinHarnessBridge({
   api: { sendText: async request => { sent.push(request.text); return { messageId: `reply-${sent.length}` }; } },
   baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: senderId,
-  botId, musicOrigin: registry, harness: { ask(...args) { asks.push(args); throw Error('UNEXPECTED_AGENT_CALL'); } },
+  botId, verifiedRoute: registry, harness: { ask(...args) { asks.push(args); throw Error('UNEXPECTED_AGENT_CALL'); } },
   state: { hasSeen: id => seen.has(id), markSeen: async id => { seen.add(id); },
     sessionFor: () => sessionId }, logger: { error() {} },
 });
@@ -142,7 +145,7 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
     async ask(id, prompt, options) {
       const body = typeof prompt === 'string' ? prompt : prompt.at(-1)?.text ?? '';
       const rpcId = `weixin-${randomUUID()}`;
-      options.claimMusicOrigin({ sessionId: id, rpcId });
+      options.claimVerifiedIngress({ sessionId: id, rpcId });
       if (body === '你好') return '普通聊天';
       const currentTurn = ++turn, message = { role: 'user', source: { kind: 'user', rpcId },
         content: [{ type: 'text', text: body }] };
@@ -186,7 +189,7 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
   const bridge = new WeixinHarnessBridge({
     api: { sendText: async request => { sent.push(request.text); return { messageId: `reply-${sent.length}` }; } },
     baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: owner,
-    botId: bot, musicOrigin: origin, harness, state, logger: { error() {} },
+    botId: bot, verifiedRoute: origin, harness, state, logger: { error() {} },
   });
   const inbound = (id, text) => ({ message_id: id, message_type: 1, from_user_id: owner,
     context_token: `context-${id}`, item_list: [{ type: 1, text_item: { text } }] });
@@ -235,4 +238,34 @@ test('trusted Weixin turns reach only the four TVmusic media tool families', asy
   assert.equal(new Set(writes.slice(-2).map(row => row.id)).size, 2);
   await bridge.accept(inbound('voice-two', '播放周杰伦的安静在大厅的小米音箱'));
   assert.equal(writes.length, beforeVoice + 2); // Duplicate delivery cannot submit again.
+});
+
+test('private scope config wires the standalone policy into the real Cordis Host injector', async t => {
+  const root = new Context(), sessionId = `session-${randomUUID()}`, mounted = [];
+  const agent = { id: sessionId, session: { id: sessionId, snapshotEvents: () => [] } };
+  for (const [name, service] of Object.entries({
+    connection: { fetch: { register: () => async () => {} } }, credentials: {},
+    typertGateway: { stream() {} }, sessionController: {}, workspaceController: {},
+    agents: { get: id => id === sessionId ? agent : undefined },
+    tools: { get: name => name === 'run_code' ? undefined : { name }, guard: () => () => {} },
+  })) root.provide(name, service);
+  const policy = root.plugin({ name: 'isolated-tvmusic-origin', inject: ['agents', 'tools'],
+    apply(ctx) { installMusicOrigin(ctx, { sessionId, botId: 'isolated-bot', senderId: 'raw-owner' },
+      { TVMUSIC_HARNESS_URL: 'http://127.0.0.1:4318/' }); } });
+  t.after(() => policy.dispose());
+  const noChannel = async () => {};
+  const host = root.plugin(createImHostPlugin({
+    createDeliveryService: () => ({}), applyWeixin: async (_ctx, config) => mounted.push(config.verifiedRoute),
+    applyFeishu: noChannel, applyDingtalk: noChannel, applyWecom: noChannel,
+    applyWecomApp: noChannel, applyQq: noChannel, applySlack: noChannel,
+    applyTelegram: noChannel, applyDiscord: noChannel, applyWhatsapp: noChannel,
+    applyIMessage: noChannel, applyOffice: noChannel,
+  }), { verifiedRouteService: 'tvmusicWeixinRoute' });
+  t.after(() => host.dispose());
+  await Promise.all([policy.await(), host.await()]);
+  assert.equal(mounted.length, 1);
+  assert.equal(mounted[0].matches('isolated-bot', 'raw-owner', sessionId), true);
+  assert.equal(mounted[0].matches('isolated-bot', 'p2p:raw-owner', sessionId), false);
+  assert.deepEqual(mounted[0].checkInbound({ botId: 'isolated-bot', senderId: 'raw-owner',
+    sessionId, text: '来首安静' }), { kind: 'allow' });
 });

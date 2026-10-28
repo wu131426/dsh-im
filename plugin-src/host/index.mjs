@@ -26,7 +26,6 @@ import { installSidebarSettingsRpc } from './sidebar-settings.mjs';
 import { installInjectedContext } from './injected-context.mjs';
 import { installSessionSyncCoordinator } from './session-sync-coordinator.mjs';
 import { installSessionTitlePrefix } from './session-title-prefix.mjs';
-import { installMusicOrigin } from './music-origin.mjs';
 import { installUpdateRpc } from './update-rpc.mjs';
 
 export const name = 'dsh-im-host';
@@ -36,13 +35,13 @@ export const inject = [
   'typertGateway',
 ];
 
-function channelConfig(config, name, deliveryService, musicOrigin) {
+function channelConfig(config, name, deliveryService, verifiedRoute) {
   const channel = { ...(config.dshHome ? { dshHome: config.dshHome } : {}), ...config[name] };
   const withAuthority = config.rpcAuthority === undefined
     ? channel
     : { ...channel, rpcAuthority: config.rpcAuthority };
   return name === 'office' ? withAuthority : { ...withAuthority, deliveryService,
-    ...(name === 'weixin' && musicOrigin ? { musicOrigin } : {}) };
+    ...(name === 'weixin' && verifiedRoute ? { verifiedRoute } : {}) };
 }
 
 export function createImHostPlugin(internals = {}) {
@@ -91,6 +90,7 @@ export function createImHostPlugin(internals = {}) {
     name,
     inject,
     async apply(ctx, config = {}) {
+      if (config.musicOrigin !== undefined) throw Error('VERIFIED_ROUTE_LEGACY_CONFIG_UNSUPPORTED');
       const unavailableSessionSyncChannels = channels
         .map(([channel]) => channel)
         .filter((channel) => channel !== 'office'
@@ -118,15 +118,22 @@ export function createImHostPlugin(internals = {}) {
         }));
       }
       const activate = async (readyCtx) => {
-        if (config.musicOrigin) {
+        if (config.verifiedRouteService) {
+          const serviceName = config.verifiedRouteService;
+          if (typeof serviceName !== 'string' || !/^[A-Za-z][A-Za-z0-9]*$/.test(serviceName))
+            throw Error('VERIFIED_ROUTE_SERVICE_INVALID');
+          const startWithRoute = async (routeCtx) => {
+            const route = routeCtx[serviceName] ?? routeCtx.get?.(serviceName);
+            if (!route || !['checkInbound', 'matches', 'admit', 'revokeOrigin', 'revokeSession',
+              'failureFor', 'formatInbound', 'formatOutcome', 'formatError', 'formatBatch',
+              'isScoped'].every(key => typeof route[key] === 'function'))
+              throw Error('VERIFIED_ROUTE_UNAVAILABLE');
+            await activateChannels(routeCtx, config, deliveryService, route);
+          };
           if (typeof readyCtx.inject !== 'function') {
-            const musicOrigin = installMusicOrigin(readyCtx, config.musicOrigin);
-            await activateChannels(readyCtx, config, deliveryService, musicOrigin);
+            await startWithRoute(readyCtx);
           } else {
-            await readyCtx.inject(['agents', 'tools'], async (musicCtx) => {
-              const musicOrigin = installMusicOrigin(musicCtx, config.musicOrigin);
-              await activateChannels(musicCtx, config, deliveryService, musicOrigin);
-            });
+            await readyCtx.inject(['agents', 'tools', serviceName], startWithRoute);
           }
         } else await activateChannels(readyCtx, config, deliveryService);
       };
@@ -147,7 +154,7 @@ export function createImHostPlugin(internals = {}) {
     },
   });
 
-  async function activateChannels(ctx, config, deliveryService, musicOrigin) {
+  async function activateChannels(ctx, config, deliveryService, verifiedRoute) {
     // Bind the bot message language before any channel connects, so the first
     // command menu a platform stores is already in the interface language.
     const hostLanguage = startHostLanguage(ctx, config);
@@ -212,20 +219,20 @@ export function createImHostPlugin(internals = {}) {
       }
     }
     const failures = [];
-    let musicWeixinFailure = null;
+    let verifiedWeixinFailure = null;
     // Each channel mounts its management RPC before awaiting initialization.
     // Start them together so a slow channel cannot leave later routes absent.
     await Promise.all(channels.map(async ([channel, start]) => {
       try {
-        await start(ctx, channelConfig(config, channel, deliveryService, musicOrigin));
+        await start(ctx, channelConfig(config, channel, deliveryService, verifiedRoute));
       } catch (error) {
         failures.push(error);
-        if (musicOrigin && channel === 'weixin') musicWeixinFailure = error;
+        if (verifiedRoute && channel === 'weixin') verifiedWeixinFailure = error;
         logger.error?.(`[dsh-im] failed to activate ${channel}; continuing with the remaining channels`, error);
       }
     }));
-    if (musicWeixinFailure) {
-      throw new Error('MUSIC_HOST_WEIXIN_UNAVAILABLE', { cause: musicWeixinFailure });
+    if (verifiedWeixinFailure) {
+      throw new Error('VERIFIED_ROUTE_WEIXIN_UNAVAILABLE', { cause: verifiedWeixinFailure });
     }
     if (failures.length === channels.length) {
       throw new AggregateError(failures, 'dsh-im failed to activate every channel');

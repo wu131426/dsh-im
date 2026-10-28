@@ -13,7 +13,6 @@ import {
 import { WeixinStateStore } from '../../../src/channels/weixin/state-store.mjs';
 import { connectionTestTarget } from '../../../src/channels/shared/connection-test.mjs';
 import { HarnessRpcError } from '../../../src/channels/shared/harness-client.mjs';
-import { createMusicOriginRegistry } from '../../../plugin-src/host/music-origin.mjs';
 import {
   OUTBOUND_ARTIFACT_TOOL,
   OutboundArtifactRegistry,
@@ -236,226 +235,52 @@ function stateFixture() {
   };
 }
 
-test('Weixin music gate replies before Agent when tools or session are unavailable; nonmusic still reaches Harness', async () => {
-  const fixture = stateFixture(), sessionId = 'session-music-bridge';
-  fixture.sessions.set('p2p:owner-user', sessionId);
-  const sent = [], prompts = [];
-  let ready = false;
-  const musicOrigin = createMusicOriginRegistry({ sessionId, botId: 'approved-bot',
-    senderId: 'owner-user', modeOf: () => 'native', toolsReady: () => ready });
-  const bridge = new WeixinHarnessBridge({
-    api: { sendText: async request => { sent.push(request.text); return { messageId: `reply-${sent.length}` }; } },
-    baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: 'owner-user',
-    botId: 'approved-bot', musicOrigin,
-    harness: { sessionExists: async () => true,
-      ask: async (id, text, options) => { prompts.push([id, text]);
-        options.claimMusicOrigin?.({ sessionId: id,
-          rpcId: `weixin-00000000-0000-4000-8000-${String(prompts.length).padStart(12, '0')}` });
-        return '隔离结果'; } },
-    state: fixture.state,
-  });
-  await bridge.accept(message('song-unavailable', '播放周杰伦的七里香'));
-  assert.equal(prompts.length, 0);
-  assert.match(sent.at(-1), /TVmusic.*不可用.*Mac/);
-  await bridge.accept(message('stop-unavailable', '停掉这首歌'));
-  assert.equal(prompts.length, 0);
-  assert.match(sent.at(-1), /音箱状态未确认.*可能仍在播放/);
-  await bridge.accept(message('ordinary-work', '运行项目测试'));
-  assert.equal(prompts.length, 1);
-  ready = true;
-  await bridge.accept(message('song-ready', '点一首刘德华的暗里着迷'));
-  assert.equal(prompts.length, 2);
-  await bridge.accept(message('new-session', '/new'));
-  await bridge.accept(message('song-new-session', '放点周杰伦的歌'));
-  assert.equal(prompts.length, 2);
-  assert.match(sent.at(-1), /会话.*未绑定.*Mac/);
-});
-
-test('Weixin rechecks music after Session binding and tool-mode change before prompt submission', async () => {
-  for (const scenario of ['rebound', 'ptc']) {
-    const fixture = stateFixture(), oldSession = 'session-music-recheck';
-    fixture.sessions.set('p2p:owner-user', oldSession);
-    let mode = 'native', submitted = 0;
-    const sent = [];
-    const musicOrigin = createMusicOriginRegistry({ sessionId: oldSession,
-      botId: 'approved-bot', senderId: 'owner-user', modeOf: () => mode,
-      toolsReady: () => true });
-    const bridge = new WeixinHarnessBridge({
-      api: { sendText: async request => { sent.push(request.text); return { messageId: 'safe-reply' }; } },
-      baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: 'owner-user',
-      botId: 'approved-bot', musicOrigin,
-      harness: {
-        sessionExists: async () => { if (scenario === 'ptc') mode = 'ptc';
-          return scenario !== 'rebound'; },
-        createSession: async () => 'session-new-unapproved',
-        ask: async (id, _prompt, options) => {
-          options.claimMusicOrigin({ sessionId: id,
-            rpcId: 'weixin-00000000-0000-4000-8000-000000000008' });
-          submitted++;
-          return 'should not submit';
-        },
-      },
-      state: fixture.state, logger: { error() {} },
-    });
-    await bridge.accept(message(`music-${scenario}`, '播放周杰伦的七里香'));
-    assert.equal(submitted, 0);
-    assert.match(sent.at(-1), scenario === 'ptc' ? /工具模式.*Mac/ : /会话.*未绑定.*Mac/);
-  }
-});
-
-test('music text with an attachment gets a fixed safe reply before any prompt', async () => {
-  const fixture = stateFixture(), sessionId = 'session-music-media';
-  fixture.sessions.set('p2p:owner-user', sessionId);
-  let asked = 0;
-  const sent = [];
-  const musicOrigin = createMusicOriginRegistry({ sessionId, botId: 'approved-bot',
-    senderId: 'owner-user', modeOf: () => 'native', toolsReady: () => true });
-  const bridge = new WeixinHarnessBridge({
-    api: { sendText: async request => { sent.push(request.text); return { messageId: 'safe-reply' }; },
-      inboundFiles: () => [{ name: 'sample.txt', load: async () => Buffer.from('sample') }] },
-    baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: 'owner-user',
-    botId: 'approved-bot', musicOrigin, state: fixture.state,
-    harness: { sessionExists: async () => true, ask: async () => { asked++; return 'unexpected'; } },
-  });
-  await bridge.accept(message('music-with-file', '播放周杰伦的七里香', {
-    item_list: [{ type: 1, text_item: { text: '播放周杰伦的七里香' } },
-      { type: 4, file_item: { file_name: 'sample.txt', media: {} } }],
-  }));
-  assert.equal(asked, 0);
-  assert.match(sent.at(-1), /图片或文件.*Mac/);
-});
-
-test('automatic and explicit Weixin steer use the same safe music gate and trusted claim', async () => {
-  const fixture = stateFixture(), sessionId = 'session-music-steer';
-  fixture.sessions.set('p2p:owner-user', sessionId);
-  let ready = false, steered = 0;
-  const sent = [];
-  const events = [], agent = { id: sessionId, session: { id: sessionId,
-    snapshotEvents: () => events } };
-  let firstCall, firstIntentId;
-  const append = (type, data) => events.push({ seq: events.length, type, data });
-  const musicOrigin = createMusicOriginRegistry({ sessionId, botId: 'approved-bot',
-    senderId: 'owner-user', agentFor: () => agent,
-    modeOf: () => 'native', toolsReady: () => ready });
-  const harness = { currentBusyMessageMode: () => 'steer',
-    workspaceSession: () => ({ steerActiveTurn: async (text, _control, options) => {
-      const rpcId = `weixin-steer-00000000-0000-4000-8000-${String(++steered).padStart(12, '0')}`;
-      options.claimMusicOrigin?.({ sessionId, rpcId });
-      const turn = steered, callId = `steer-call-${steered}`;
-      append('turn/start', { turn }); append('step/start', { turn, step: 1 });
-      append('user/message', { role: 'user', source: { kind: 'user', rpcId },
-        content: [{ type: 'text', text }] });
-      append('tool/call', { turn, step: 1, callId, name: 'tvmusic_music_play' });
-      if (steered === 1) { firstCall = { callId, rootCallId: callId,
-        name: 'tvmusic_music_play', agent }; firstIntentId = rpcId.slice('weixin-steer-'.length); }
-      return true;
-    } }),
+test('generic verified route binds the raw Weixin sender and preserves ordinary chat', async () => {
+  const f = stateFixture(), sessionId = 'session-verified-route', sent = [], admissions = [];
+  f.sessions.set('p2p:owner-user', sessionId);
+  let ready = false, admitAllowed = true, retired = false;
+  const scopedRpcIds = new Set();
+  const verifiedRoute = {
+    checkInbound({ text }) { return text === '受限请求' && (!ready || retired)
+      ? { kind: 'reject', reason: 'SCOPED_UNAVAILABLE' }
+      : retired ? { kind: 'allow', claim: false } : { kind: 'allow' }; },
+    formatInbound: () => '入口暂不可用',
+    matches: (_bot, sender, id) => sender === 'owner-user' && id === sessionId,
+    admit(value) { admissions.push(value);
+      if (!admitAllowed) return false;
+      if (value.text === '受限请求') scopedRpcIds.add(value.rpcId); return true; },
+    revokeOrigin() {}, revokeSession() {}, isScoped: text => text === '受限请求',
+    failureFor: rpcId => scopedRpcIds.has(rpcId) ? { reason: 'SCOPED_ACCEPTED' } : null,
+    formatOutcome: () => '已受理原请求', formatBatch: () => '批量不支持',
+    formatError: code => code === 'VERIFIED_ROUTE_ADMISSION_FAILED' ? '来源待核验' : null,
   };
   const bridge = new WeixinHarnessBridge({
     api: { sendText: async request => { sent.push(request.text); return { messageId: `reply-${sent.length}` }; } },
     baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: 'owner-user',
-    botId: 'approved-bot', musicOrigin, harness, state: fixture.state,
+    botId: 'approved-bot', verifiedRoute, state: f.state,
+    harness: { sessionExists: async () => true,
+      ask: async (id, _prompt, options) => { options.claimVerifiedIngress?.({ sessionId: id,
+        rpcId: 'weixin-00000000-0000-4000-8000-000000000001' }); return '模型可能乱说'; } },
   });
-  await bridge.accept(message('auto-stop-denied', '停掉这首歌'));
-  assert.equal(steered, 0);
-  assert.match(sent.at(-1), /音箱状态未确认.*可能仍在播放/);
-  await bridge.accept(message('explicit-denied', '/steer 播放周杰伦的七里香'));
-  assert.equal(steered, 0);
-  assert.match(sent.at(-1), /TVmusic.*不可用.*Mac/);
+  await bridge.accept(message('scoped-unavailable', '受限请求'));
+  assert.deepEqual(sent, ['入口暂不可用']); assert.equal(admissions.length, 0);
+  await bridge.accept(message('ordinary', '查 Content OS 进度'));
+  assert.equal(sent.at(-1), '模型可能乱说');
   ready = true;
-  await bridge.accept(message('auto-accepted', '改成播放刘德华的暗里着迷'));
-  assert.equal(steered, 1);
-  await musicOrigin.recordOutcome(firstCall, { isError: false,
-    value: { id: firstIntentId, status: 'UNKNOWN', instruction: '客厅 Sound Pro 当前不可用。' } });
-  await musicOrigin.completeTurn(agent, 1);
-  assert.match(sent.at(-1), /播放结果待确认.*Sound Pro 当前不可用/);
-  await bridge.accept(message('explicit-accepted', '/steer 播放周杰伦的七里香'));
-  assert.equal(steered, 2);
-  assert.match(sent.at(-1), /已提交补充指令/);
+  await bridge.accept(message('scoped-ready', '受限请求'));
+  assert.equal(sent.at(-1), '已受理原请求');
+  assert.equal(admissions.at(-1).senderId, 'owner-user');
+  assert.equal(admissions.at(-1).sessionId, sessionId);
+  admitAllowed = false;
+  await bridge.accept(message('scoped-admission-failed', '受限请求'));
+  assert.match(sent.at(-1), /^来源待核验/);
+  const admittedBeforeRetire = admissions.length;
+  retired = true;
+  await bridge.accept(message('ordinary-after-retire', '查 Content OS 状态'));
+  assert.equal(sent.at(-1), '模型可能乱说');
+  assert.equal(admissions.length, admittedBeforeRetire);
 });
 
-test('Weixin batch synthesis never becomes a single human music origin', async () => {
-  const fixture = stateFixture(), sessionId = 'session-music-batch';
-  fixture.sessions.set('p2p:owner-user', sessionId);
-  const sent = []; let asked = 0;
-  const musicOrigin = createMusicOriginRegistry({ sessionId, botId: 'approved-bot',
-    senderId: 'owner-user', modeOf: () => 'native', toolsReady: () => true });
-  const bridge = new WeixinHarnessBridge({
-    api: { sendText: async request => { sent.push(request.text); return { messageId: `reply-${sent.length}` }; } },
-    baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: 'owner-user',
-    botId: 'approved-bot', musicOrigin, state: fixture.state,
-    harness: { sessionExists: async () => true,
-      ask: async () => { asked++; return '普通批量完成'; } },
-  });
-  await bridge.accept(message('batch-start', '/batch'));
-  await bridge.accept(message('batch-song', '播放周杰伦的七里香'));
-  await bridge.accept(message('batch-send', '/send'));
-  assert.equal(asked, 0);
-  assert.match(sent.at(-1), /批量消息.*单条发送.*Mac/);
-  await bridge.accept(message('batch-other-start', '/batch'));
-  await bridge.accept(message('batch-other', '查询 Content OS 状态'));
-  await bridge.accept(message('batch-other-send', '/send'));
-  assert.equal(asked, 1);
-  assert.equal(sent.at(-1), '普通批量完成');
-});
-
-test('Weixin never relays a model playback claim without a TVmusic tool result', async () => {
-  const fixture = stateFixture(), sessionId = 'session-music-no-result';
-  fixture.sessions.set('p2p:owner-user', sessionId);
-  const sent = [];
-  const musicOrigin = createMusicOriginRegistry({ sessionId, botId: 'approved-bot',
-    senderId: 'owner-user', modeOf: () => 'native', toolsReady: () => true });
-  const bridge = new WeixinHarnessBridge({
-    api: { sendText: async request => { sent.push(request.text); return { messageId: 'safe-reply' }; } },
-    baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: 'owner-user',
-    botId: 'approved-bot', musicOrigin, state: fixture.state,
-    harness: { sessionExists: async () => true,
-      ask: async (id, _prompt, options) => {
-        options.claimMusicOrigin({ sessionId: id,
-          rpcId: 'weixin-00000000-0000-4000-8000-000000000099' });
-        return '我已在 Mac 播放了歌曲';
-      } },
-  });
-  await bridge.accept(message('model-claim', '播放周杰伦的七里香'));
-  assert.match(sent.at(-1), /没有可核验的点歌结果.*补充歌曲信息/);
-  assert.doesNotMatch(sent.at(-1), /我已在 Mac 播放/);
-});
-
-test('a newer music steer suppresses a late old model playback claim', async () => {
-  const fixture = stateFixture(), sessionId = 'session-music-late-answer';
-  fixture.sessions.set('p2p:owner-user', sessionId);
-  const sent = [];
-  let claimed = false, releaseOld;
-  const oldAnswer = new Promise(resolve => { releaseOld = resolve; });
-  const musicOrigin = createMusicOriginRegistry({ sessionId, botId: 'approved-bot',
-    senderId: 'owner-user', modeOf: () => 'native', toolsReady: () => true });
-  const ask = async (id, _prompt, options) => { options.claimMusicOrigin({ sessionId: id,
-    rpcId: 'weixin-00000000-0000-4000-8000-000000000010' });
-    claimed = true; return oldAnswer; };
-  const bridge = new WeixinHarnessBridge({
-    api: { sendText: async request => { sent.push(request.text); return { messageId: `reply-${sent.length}` }; } },
-    baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: 'owner-user',
-    botId: 'approved-bot', musicOrigin, state: fixture.state,
-    harness: { sessionExists: async () => true, currentBusyMessageMode: () => 'steer',
-      ask,
-      workspaceSession: () => ({ sessionExists: async () => true,
-        ask: (prompt, options) => ask(sessionId, prompt, options),
-        steerActiveTurn: async (_text, _control, options) => {
-        if (!claimed) return false;
-        options.claimMusicOrigin({ sessionId,
-          rpcId: 'weixin-steer-00000000-0000-4000-8000-000000000011' });
-        return true;
-      } }),
-    },
-  });
-  const old = bridge.accept(message('old-song', '播放周杰伦的七里香'));
-  await eventually(() => claimed);
-  await bridge.accept(message('new-song', '改成播放刘德华的暗里着迷'));
-  releaseOld('旧歌已开始在客厅播放');
-  await old;
-  assert.ok(sent.some(text => /已被新请求取代/.test(text)));
-  assert.ok(sent.every(text => !/旧歌已开始在客厅播放/.test(text)));
-});
 
 const PNG_BYTES = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
