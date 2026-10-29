@@ -649,6 +649,56 @@ test('a refused in-process control action never falls through to HTTP', async ()
   assert.equal(await asking, 'normal completion');
 });
 
+test('a refused Weixin steer retracts its Host-only origin claim without a second prompt', async () => {
+  const calls = [];
+  const turn = controlledTurn({ controlExecutor: request => { calls.push(['executor', request.inputRpcId]);
+    return false; } });
+  const control = { owner: {}, key: 'direct:origin-refusal' };
+  const asking = turn.client.ask(turn.id, 'work', { control, timeoutMs: 2_000 });
+  await turn.admitted;
+  assert.equal(await turn.client.steerActiveTurn(turn.id, '播放七里香', control, {
+    claimVerifiedIngress({ sessionId, rpcId }) { assert.equal(sessionId, turn.id);
+      calls.push(['claim', rpcId]); },
+    revokeVerifiedIngress(rpcId) { calls.push(['revoke', rpcId]); },
+  }), false);
+  assert.deepEqual(calls.map(([kind]) => kind), ['claim', 'executor', 'revoke']);
+  assert.equal(calls[0][1], calls[1][1]);
+  assert.equal(calls[1][1], calls[2][1]);
+  turn.finish({ text: 'done', reason: 'completed' });
+  assert.equal(await asking, 'done');
+});
+
+test('generic verified ingress claims the Host-minted prompt ID before model submission', async () => {
+  const client = new HarnessClient({ baseUrl: 'http://127.0.0.1:3080', workspace: '/tmp/isolated' });
+  client.ensureRunning = async () => undefined;
+  const calls = [];
+  client.rpc = async (method, payload, _timeout, options) => {
+    calls.push([method, payload, options]);
+    if (method === 'workspace.list') return { archivedSessionIds: [] };
+    if (method === 'session.history') return { events: [] };
+    if (method === 'session.prompt') throw Error('ISOLATED_PROMPT_STOP');
+    throw Error(`UNEXPECTED_${method}`);
+  };
+  let claim;
+  await assert.rejects(client.ask('session-isolated', '普通请求', {
+    claimVerifiedIngress: value => { claim = value; },
+  }), /ISOLATED_PROMPT_STOP/);
+  assert.equal(claim.sessionId, 'session-isolated');
+  assert.match(claim.rpcId, /^im-[a-f\d-]{36}$/);
+  assert.equal(calls.find(([method]) => method === 'session.prompt')[2].rpcId, claim.rpcId);
+  const guarded = new HarnessClient({ baseUrl: 'http://127.0.0.1:3080', workspace: '/tmp/isolated' });
+  guarded.ensureRunning = async () => undefined;
+  let submitted = 0;
+  guarded.rpc = async method => { if (method === 'workspace.list') return { archivedSessionIds: [] };
+    if (method === 'session.history') return { events: [] };
+    if (method === 'session.prompt') submitted++;
+    return {}; };
+  await assert.rejects(guarded.ask('session-isolated', '普通请求', {
+    claimVerifiedIngress: () => { throw Error('VERIFIED_ROUTE_ADMISSION_FAILED'); },
+  }), /VERIFIED_ROUTE_ADMISSION_FAILED/);
+  assert.equal(submitted, 0);
+});
+
 for (const [name, value] of [
   ['Shanghai', 'Asia/Shanghai'],
   ['UTC', 'UTC'],

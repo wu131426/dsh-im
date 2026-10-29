@@ -235,6 +235,53 @@ function stateFixture() {
   };
 }
 
+test('generic verified route binds the raw Weixin sender and preserves ordinary chat', async () => {
+  const f = stateFixture(), sessionId = 'session-verified-route', sent = [], admissions = [];
+  f.sessions.set('p2p:owner-user', sessionId);
+  let ready = false, admitAllowed = true, retired = false;
+  const scopedRpcIds = new Set();
+  const verifiedRoute = {
+    checkInbound({ text }) { return text === '受限请求' && (!ready || retired)
+      ? { kind: 'reject', reason: 'SCOPED_UNAVAILABLE' }
+      : retired ? { kind: 'allow', claim: false } : { kind: 'allow' }; },
+    formatInbound: () => '入口暂不可用',
+    matches: (_bot, sender, id) => sender === 'owner-user' && id === sessionId,
+    admit(value) { admissions.push(value);
+      if (!admitAllowed) return false;
+      if (value.text === '受限请求') scopedRpcIds.add(value.rpcId); return true; },
+    revokeOrigin() {}, revokeSession() {}, isScoped: text => text === '受限请求',
+    failureFor: rpcId => scopedRpcIds.has(rpcId) ? { reason: 'SCOPED_ACCEPTED' } : null,
+    formatOutcome: () => '已受理原请求', formatBatch: () => '批量不支持',
+    formatError: code => code === 'VERIFIED_ROUTE_ADMISSION_FAILED' ? '来源待核验' : null,
+  };
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async request => { sent.push(request.text); return { messageId: `reply-${sent.length}` }; } },
+    baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'isolated-token', ownerUserId: 'owner-user',
+    botId: 'approved-bot', verifiedRoute, state: f.state,
+    harness: { sessionExists: async () => true,
+      ask: async (id, _prompt, options) => { options.claimVerifiedIngress?.({ sessionId: id,
+        rpcId: 'weixin-00000000-0000-4000-8000-000000000001' }); return '模型可能乱说'; } },
+  });
+  await bridge.accept(message('scoped-unavailable', '受限请求'));
+  assert.deepEqual(sent, ['入口暂不可用']); assert.equal(admissions.length, 0);
+  await bridge.accept(message('ordinary', '查 Content OS 进度'));
+  assert.equal(sent.at(-1), '模型可能乱说');
+  ready = true;
+  await bridge.accept(message('scoped-ready', '受限请求'));
+  assert.equal(sent.at(-1), '已受理原请求');
+  assert.equal(admissions.at(-1).senderId, 'owner-user');
+  assert.equal(admissions.at(-1).sessionId, sessionId);
+  admitAllowed = false;
+  await bridge.accept(message('scoped-admission-failed', '受限请求'));
+  assert.match(sent.at(-1), /^来源待核验/);
+  const admittedBeforeRetire = admissions.length;
+  retired = true;
+  await bridge.accept(message('ordinary-after-retire', '查 Content OS 状态'));
+  assert.equal(sent.at(-1), '模型可能乱说');
+  assert.equal(admissions.length, admittedBeforeRetire);
+});
+
+
 const PNG_BYTES = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
   0x01, 0x02, 0x03,

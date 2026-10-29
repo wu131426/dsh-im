@@ -24,6 +24,7 @@ export class BusyMessageDispatcher {
     control, signal, enhancement, pendingInteraction, acceptedMessageIds,
     mode = harness.currentBusyMessageMode?.(), onFailure,
     enqueue, isQueued, send, logger = console, onSteered, onError,
+    beforeSteer, claimVerifiedIngress, revokeVerifiedIngress,
   }) {
     // Read once, before any await: a settings change cannot reinterpret this input.
     const steer = normalizeBusyMessageMode(mode) === 'steer'
@@ -56,8 +57,14 @@ export class BusyMessageDispatcher {
       status.messagesReceived = (status.messagesReceived ?? 0) + 1;
       status.lastMessageAt = new Date().toISOString();
       signal?.throwIfAborted();
+      const admission = await beforeSteer?.();
+      if (admission?.kind === 'reject') {
+        await send(admission.reply);
+        return {};
+      }
       const submitted = await steerMessage(text, harness, state, key, {
         signal, control, enhancement, pendingInteraction: pendingInteraction(),
+        claimVerifiedIngress, revokeVerifiedIngress,
       });
       if (!submitted) return queue(true);
       // Submission is final even if its receipt fails.

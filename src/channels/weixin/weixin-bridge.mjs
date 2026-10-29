@@ -299,6 +299,7 @@ export function createWeixinBridgeStatus() {
   };
 }
 
+
 export class WeixinHarnessBridge {
   #api;
   #baseUrl;
@@ -309,6 +310,8 @@ export class WeixinHarnessBridge {
   #deferred;
   #contextEnhancement;
   #accessPolicy;
+  #verifiedRoute;
+  #botId;
   #status;
   #logger;
   #replyTimeoutMs;
@@ -343,6 +346,8 @@ export class WeixinHarnessBridge {
     state,
     contextEnhancement,
     accessPolicy,
+    verifiedRoute,
+    botId,
     status = createWeixinBridgeStatus(),
     logger = console,
     replyTimeoutMs = 600_000,
@@ -364,6 +369,8 @@ export class WeixinHarnessBridge {
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
+    this.#verifiedRoute = verifiedRoute;
+    this.#botId = botId;
     this.#status = status;
     this.#logger = logger;
     this.#replyTimeoutMs = replyTimeoutMs;
@@ -378,6 +385,35 @@ export class WeixinHarnessBridge {
 
   get status() {
     return structuredClone(this.#status);
+  }
+
+  #verifiedRouteCheck(sender, sessionId, text, hasMedia = false) {
+    if (!this.#verifiedRoute) return { kind: 'allow' };
+    const route = this.#verifiedRoute.checkInbound({ botId: this.#botId,
+      senderId: sender, sessionId, text, hasMedia });
+    if (route.kind !== 'reject') return route;
+    return { ...route, reply: this.#verifiedRoute.formatInbound(route, text, t) };
+  }
+
+  #verifiedClaim(sender, text, onClaim, onFailure) {
+    if (!this.#verifiedRoute) return {};
+    return {
+      claimVerifiedIngress: ({ sessionId, rpcId }) => {
+        const route = this.#verifiedRouteCheck(sender, sessionId, text);
+        if (route.kind === 'reject') {
+          throw Object.assign(Error('VERIFIED_ROUTE_REJECTED'), { code: route.reason });
+        }
+        if (route.claim === false) return;
+        if (!this.#verifiedRoute.matches(this.#botId, sender, sessionId)) return;
+        if (!this.#verifiedRoute.admit({ channel: 'weixin', botId: this.#botId,
+          senderId: sender, sessionId, rpcId, text, onFailure })) {
+          throw Object.assign(Error('VERIFIED_ROUTE_ADMISSION_FAILED'),
+            { code: 'VERIFIED_ROUTE_ADMISSION_FAILED' });
+        }
+        onClaim?.(rpcId);
+      },
+      revokeVerifiedIngress: rpcId => this.#verifiedRoute.revokeOrigin(rpcId),
+    };
   }
 
   accept(message) {
@@ -558,6 +594,10 @@ export class WeixinHarnessBridge {
       enhancement: this.#acceptedMessageIds.get(messageId),
       isQueued: () => this.#queues.has(key),
       enqueue: (options) => this.#enqueueMessage(message, messageId, key, options),
+      beforeSteer: () => this.#verifiedRouteCheck(sender, this.#state.sessionFor?.(key) ?? null, commandText),
+      ...this.#verifiedClaim(sender, commandText, undefined,
+        failure => this.#sendOutOfBand(key, sender,
+          this.#verifiedRoute.formatOutcome(failure, t), contextToken, runId)),
       send: (reply) => this.#sendOutOfBand(key, sender, reply, contextToken, runId),
       onError: (error) => this.#handleInteractionFailure(message, messageId, error),
     });
@@ -736,6 +776,15 @@ export class WeixinHarnessBridge {
     await this.#state.markSeen(messageId);
     this.#status.messagesReceived += 1;
     this.#status.lastMessageAt = new Date().toISOString();
+    const steerInstruction = /^\/steer\s+([\s\S]+)/iu.exec(text)?.[1]?.trim();
+    if (steerInstruction) {
+      const route = this.#verifiedRouteCheck(sender, this.#state.sessionFor?.(key) ?? null,
+        steerInstruction, hasWeixinImageItems(message) || hasWeixinFileItems(message));
+      if (route.kind === 'reject') {
+        await this.#send(sender, route.reply, contextToken, runId);
+        return;
+      }
+    }
     const result = await runner(text, this.#harness, this.#state, key, {
       signal: this.#signal,
       isDirect: true,
@@ -745,6 +794,9 @@ export class WeixinHarnessBridge {
         || this.#approvals.hasPending(key),
       busy: this.#queues.has(key) || this.#batchInputs.status(key).phase !== 'idle',
       control: { owner: this, key },
+      ...(steerInstruction ? this.#verifiedClaim(sender, steerInstruction, undefined,
+        failure => this.#sendOutOfBand(key, sender,
+          this.#verifiedRoute.formatOutcome(failure, t), contextToken, runId)) : {}),
       deferredDelivery: this.#deferred,
       enhancement: captureContextEnhancementSource(
         this.#contextEnhancement,
@@ -794,12 +846,21 @@ export class WeixinHarnessBridge {
     const runId = typeof message.run_id === 'string' ? message.run_id : undefined;
     let batchSettled = batchSubmission === null;
     let promptRecorded = false;
+    let routeRpcId = null;
     try {
       const promptMessage = preparedMessage ?? this.#inboundMessage(message);
       const text = promptMessage.content;
       const hasImages = hasInboundImages(promptMessage);
       const hasFiles = hasInboundFiles(promptMessage);
       const hasReply = hasReplyReference(promptMessage);
+      if (batchSubmission?.messages?.some(text => this.#verifiedRoute?.isScoped(text))) {
+        this.#batchInputs.complete(key, batchSubmission.token);
+        batchSettled = true;
+        await this.#send(sender, this.#verifiedRoute.formatBatch(t),
+          contextToken, runId);
+        await this.#state.markSeen(messageId);
+        return;
+      }
       if (!text && !hasImages && !hasFiles && !hasReply) {
         await this.#send(sender, t('目前支持文字、图片、文件，以及微信已转成文字的语音消息。'), contextToken, runId);
         await this.#state.markSeen(messageId);
@@ -819,6 +880,7 @@ export class WeixinHarnessBridge {
         return;
       }
       if (!hasImages && !hasFiles && command === '/new') {
+        this.#verifiedRoute?.revokeSession(this.#state.sessionFor?.(key));
         await this.#state.clearSession(key);
         await this.#send(sender, t('已开启新会话。请发送你的问题。'), contextToken, runId);
         await this.#state.markSeen(messageId);
@@ -847,6 +909,16 @@ export class WeixinHarnessBridge {
         await this.#send(sender, compactCommand.message, contextToken, runId);
         await this.#state.markSeen(messageId);
         return;
+      }
+
+      if (this.#verifiedRoute) {
+        const route = this.#verifiedRouteCheck(sender, this.#state.sessionFor?.(key) ?? null,
+          text, hasImages || hasFiles);
+        if (route.kind === 'reject') {
+          await this.#send(sender, route.reply, contextToken, runId);
+          await this.#state.markSeen(messageId);
+          return;
+        }
       }
 
       let answer;
@@ -884,6 +956,8 @@ export class WeixinHarnessBridge {
           askOptions: {
             timeoutMs: this.#replyTimeoutMs,
             signal: this.#signal,
+            ...(this.#verifiedRoute && !hasImages && !hasFiles
+              ? this.#verifiedClaim(sender, text, rpcId => { routeRpcId = rpcId; }) : {}),
             control: { owner: this, key },
             onUpdate: () => this.#resumeTyping(key, sender, contextToken),
             onInteraction: (interaction) => this.#handleInteraction(interaction, {
@@ -914,13 +988,15 @@ export class WeixinHarnessBridge {
       const answerText = typeof answer === 'string' && answer.trim()
         ? answer
         : artifacts.length > 0 ? t('结果文件已生成。') : answer;
+      const routeOutcome = this.#verifiedRoute?.failureFor(routeRpcId);
+      const scopedAnswer = routeOutcome && this.#verifiedRoute.formatOutcome(routeOutcome, t);
       let textDeliveryError = null;
       let textReceipt = null;
       try {
         textReceipt = createDeliveryReceipt({
           deliveryId: messageId,
           presentation: 'weixin-text',
-          providerMessageIds: await this.#send(sender, answerText, contextToken, runId),
+          providerMessageIds: await this.#send(sender, scopedAnswer ?? answerText, contextToken, runId),
         });
       } catch (error) {
         textDeliveryError = channelDeliveryFailure(error);
@@ -965,7 +1041,7 @@ export class WeixinHarnessBridge {
       }
       if (this.#signal?.aborted) return;
       this.#status.lastError = error?.message ?? String(error);
-      const userMessage = inboundFileUserMessage(error)
+      const userMessage = this.#verifiedRoute?.formatError(error?.code, t) ?? inboundFileUserMessage(error)
         ?? imagePromptUserMessage(error);
       const imageDiagnostic = imagePromptDiagnostic(error);
       const sendFailureOptions = weixinSendFailureOptions(error);

@@ -35,12 +35,13 @@ export const inject = [
   'typertGateway',
 ];
 
-function channelConfig(config, name, deliveryService) {
+function channelConfig(config, name, deliveryService, verifiedRoute) {
   const channel = { ...(config.dshHome ? { dshHome: config.dshHome } : {}), ...config[name] };
   const withAuthority = config.rpcAuthority === undefined
     ? channel
     : { ...channel, rpcAuthority: config.rpcAuthority };
-  return name === 'office' ? withAuthority : { ...withAuthority, deliveryService };
+  return name === 'office' ? withAuthority : { ...withAuthority, deliveryService,
+    ...(name === 'weixin' && verifiedRoute ? { verifiedRoute } : {}) };
 }
 
 export function createImHostPlugin(internals = {}) {
@@ -89,6 +90,7 @@ export function createImHostPlugin(internals = {}) {
     name,
     inject,
     async apply(ctx, config = {}) {
+      if (config.musicOrigin !== undefined) throw Error('VERIFIED_ROUTE_LEGACY_CONFIG_UNSUPPORTED');
       const unavailableSessionSyncChannels = channels
         .map(([channel]) => channel)
         .filter((channel) => channel !== 'office'
@@ -116,7 +118,24 @@ export function createImHostPlugin(internals = {}) {
         }));
       }
       const activate = async (readyCtx) => {
-        await activateChannels(readyCtx, config, deliveryService);
+        if (config.verifiedRouteService) {
+          const serviceName = config.verifiedRouteService;
+          if (typeof serviceName !== 'string' || !/^[A-Za-z][A-Za-z0-9]*$/.test(serviceName))
+            throw Error('VERIFIED_ROUTE_SERVICE_INVALID');
+          const startWithRoute = async (routeCtx) => {
+            const route = routeCtx[serviceName] ?? routeCtx.get?.(serviceName);
+            if (!route || !['checkInbound', 'matches', 'admit', 'revokeOrigin', 'revokeSession',
+              'failureFor', 'formatInbound', 'formatOutcome', 'formatError', 'formatBatch',
+              'isScoped'].every(key => typeof route[key] === 'function'))
+              throw Error('VERIFIED_ROUTE_UNAVAILABLE');
+            await activateChannels(routeCtx, config, deliveryService, route);
+          };
+          if (typeof readyCtx.inject !== 'function') {
+            await startWithRoute(readyCtx);
+          } else {
+            await readyCtx.inject(['agents', 'tools', serviceName], startWithRoute);
+          }
+        } else await activateChannels(readyCtx, config, deliveryService);
       };
       if (typeof ctx?.inject === 'function') {
         await ctx.inject(
@@ -135,7 +154,7 @@ export function createImHostPlugin(internals = {}) {
     },
   });
 
-  async function activateChannels(ctx, config, deliveryService) {
+  async function activateChannels(ctx, config, deliveryService, verifiedRoute) {
     // Bind the bot message language before any channel connects, so the first
     // command menu a platform stores is already in the interface language.
     const hostLanguage = startHostLanguage(ctx, config);
@@ -200,16 +219,21 @@ export function createImHostPlugin(internals = {}) {
       }
     }
     const failures = [];
+    let verifiedWeixinFailure = null;
     // Each channel mounts its management RPC before awaiting initialization.
     // Start them together so a slow channel cannot leave later routes absent.
     await Promise.all(channels.map(async ([channel, start]) => {
       try {
-        await start(ctx, channelConfig(config, channel, deliveryService));
+        await start(ctx, channelConfig(config, channel, deliveryService, verifiedRoute));
       } catch (error) {
         failures.push(error);
+        if (verifiedRoute && channel === 'weixin') verifiedWeixinFailure = error;
         logger.error?.(`[dsh-im] failed to activate ${channel}; continuing with the remaining channels`, error);
       }
     }));
+    if (verifiedWeixinFailure) {
+      throw new Error('VERIFIED_ROUTE_WEIXIN_UNAVAILABLE', { cause: verifiedWeixinFailure });
+    }
     if (failures.length === channels.length) {
       throw new AggregateError(failures, 'dsh-im failed to activate every channel');
     }
