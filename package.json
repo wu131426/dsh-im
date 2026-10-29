@@ -46,6 +46,7 @@
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
+    "./host-harness": "./src/host-harness-client.mjs",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
